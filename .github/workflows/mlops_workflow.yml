@@ -37,9 +37,8 @@ jobs:
                 image: prom/prometheus:latest
                 ports:
                     - 9090:9090
-                options: >
-                    -v ${GITHUB_WORKSPACE}/prometheus.yml:/etc/prometheus/prometheus.yml 
-                    --config.file=/etc/prometheus/prometheus.yml
+                options: |
+                    -v ${GITHUB_WORKSPACE}/prometheus.yml:/etc/prometheus/prometheus.yml
 
             # Setup Grafana service
             grafana:
