@@ -39,6 +39,7 @@ jobs:
                     - 9090:9090
                 options: >
                     -v ${{ github.workspace }}/prometheus.yml:/etc/prometheus/prometheus.yml
+                command: >
                     --config.file=/etc/prometheus/prometheus.yml
 
             # Setup Grafana service
