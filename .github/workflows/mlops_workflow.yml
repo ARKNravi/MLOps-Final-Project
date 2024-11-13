@@ -32,12 +32,6 @@ jobs:
         runs-on: ubuntu-latest
         needs: build_and_cache_dependencies
         services:
-            # Setup Prometheus service with the correct configuration
-            prometheus:
-                image: prom/prometheus:latest
-                ports:
-                    - 9090:9090
-
             grafana:
                 image: grafana/grafana:latest
                 ports:
@@ -47,13 +41,18 @@ jobs:
             - name: Checkout repository
               uses: actions/checkout@v2
 
-            # Copy Prometheus config to the local workspace folder and use it during Docker setup
+            # Set up Prometheus configuration directory and remove existing Prometheus container if exists
             - name: Set up Prometheus configuration
               run: |
+                  # Set up Prometheus configuration
                   mkdir -p ./prometheus_config
                   cp prometheus.yml ./prometheus_config/prometheus.yml
+
+                  # Clean up existing Prometheus container, if any
                   docker stop prometheus || true
                   docker rm prometheus || true
+
+                  # Start Prometheus container
                   docker run -d --name prometheus -p 9090:9090 \
                     -v $(pwd)/prometheus_config/prometheus.yml:/etc/prometheus/prometheus.yml prom/prometheus:latest
 
