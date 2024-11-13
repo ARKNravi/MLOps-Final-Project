@@ -32,17 +32,12 @@ jobs:
         runs-on: ubuntu-latest
         needs: build_and_cache_dependencies
         services:
-            # Setup Prometheus service with a custom configuration
+            # Setup Prometheus service with the correct configuration
             prometheus:
                 image: prom/prometheus:latest
                 ports:
                     - 9090:9090
-                options: >
-                    -v ${{ github.workspace }}/prometheus.yml:/etc/prometheus/prometheus.yml
-                command: >
-                    --config.file=/etc/prometheus/prometheus.yml
 
-            # Setup Grafana service
             grafana:
                 image: grafana/grafana:latest
                 ports:
@@ -51,6 +46,15 @@ jobs:
         steps:
             - name: Checkout repository
               uses: actions/checkout@v2
+
+            - name: Set up Prometheus configuration
+              run: |
+                  mkdir -p /etc/prometheus
+                  cp prometheus.yml /etc/prometheus/prometheus.yml
+                  docker stop prometheus || true
+                  docker rm prometheus || true
+                  docker run -d --name prometheus -p 9090:9090 \
+                    -v /etc/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml prom/prometheus:latest
 
             - name: Pull and Run Dependency Image
               env:
