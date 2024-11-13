@@ -47,14 +47,15 @@ jobs:
             - name: Checkout repository
               uses: actions/checkout@v2
 
+            # Copy Prometheus config to the local workspace folder and use it during Docker setup
             - name: Set up Prometheus configuration
               run: |
-                  mkdir -p /etc/prometheus
-                  cp prometheus.yml /etc/prometheus/prometheus.yml
+                  mkdir -p ./prometheus_config
+                  cp prometheus.yml ./prometheus_config/prometheus.yml
                   docker stop prometheus || true
                   docker rm prometheus || true
                   docker run -d --name prometheus -p 9090:9090 \
-                    -v /etc/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml prom/prometheus:latest
+                    -v $(pwd)/prometheus_config/prometheus.yml:/etc/prometheus/prometheus.yml prom/prometheus:latest
 
             - name: Pull and Run Dependency Image
               env:
