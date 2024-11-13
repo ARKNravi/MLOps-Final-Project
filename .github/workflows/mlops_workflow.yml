@@ -42,13 +42,13 @@ jobs:
               uses: actions/checkout@v2
 
             # Set up Prometheus configuration directory and remove existing Prometheus container if exists
-            - name: Set up Prometheus configuration
+            - name: Set up Prometheus configuration and start Prometheus
               run: |
                   # Set up Prometheus configuration
                   mkdir -p ./prometheus_config
                   cp prometheus.yml ./prometheus_config/prometheus.yml
 
-                  # Clean up existing Prometheus container, if any
+                  # Stop and remove existing Prometheus container, if any
                   docker stop prometheus || true
                   docker rm prometheus || true
 
@@ -63,7 +63,17 @@ jobs:
                   SUPABASE_S3_ACCESS_KEY_ID: ${{ secrets.SUPABASE_S3_ACCESS_KEY_ID }}
                   SUPABASE_S3_SECRET_ACCESS_KEY: ${{ secrets.SUPABASE_S3_SECRET_ACCESS_KEY }}
               run: |
-                  docker pull ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest
+                  # Pull the Docker dependency image with retry mechanism to avoid temporary network issues
+                  n=0
+                  until [ "$n" -ge 5 ]
+                  do
+                      docker pull ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest && break
+                      n=$((n+1))
+                      echo "Retrying in 5 seconds..."
+                      sleep 5
+                  done
+
+                  # Run the Docker container with dependencies
                   docker run --rm -v ${{ github.workspace }}:/app -w /app ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest bash -c "
                     # Git configuration
                     git config --global user.email 'actions@github.com' &&
