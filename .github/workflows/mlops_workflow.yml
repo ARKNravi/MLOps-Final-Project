@@ -27,17 +27,19 @@ jobs:
                   docker build -t ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest .
                   docker push ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest
 
-    # Step 2: Training and Evaluating Model with Prometheus Metrics
+    # Step 2: Training and Evaluating Model with Prometheus and Grafana
     train_and_evaluate:
         runs-on: ubuntu-latest
         needs: build_and_cache_dependencies
         services:
-            # Setup Prometheus service
+            # Setup Prometheus service with a custom configuration
             prometheus:
                 image: prom/prometheus:latest
                 ports:
                     - 9090:9090
-                options: --config.file=./prometheus.yml
+                options: >
+                    -v ${GITHUB_WORKSPACE}/prometheus.yml:/etc/prometheus/prometheus.yml 
+                    --config.file=/etc/prometheus/prometheus.yml
 
             # Setup Grafana service
             grafana:
