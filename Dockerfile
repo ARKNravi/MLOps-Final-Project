@@ -1,21 +1,23 @@
-# Use the official Python image
 FROM python:3.11-slim
+
+# Install git and any other dependencies
+RUN apt-get update && apt-get install -y git
 
 # Set the working directory
 WORKDIR /app
 
-# Copy the requirements file and install dependencies
-COPY requirements.txt /app/
-RUN pip install --no-cache-dir -r requirements.txt
+# Configure Git to trust the /app directory
+RUN git config --global --add safe.directory /app
 
-# Copy the entire project into the container
-COPY . /app/
+# Copy dependency files
+COPY requirements.txt ./
 
-# Set the environment variable to avoid buffering in Python
-ENV PYTHONUNBUFFERED 1
+# Install dependencies
+RUN pip install --upgrade pip \
+    && pip install -r requirements.txt
 
-# Expose the port your application will run on
-EXPOSE 5000
+# Copy the script directory to the container
+COPY script/ /app/script
 
-# Command to run your app (Flask app or any API service)
-CMD ["python", "app.py"]
+# Set default command
+CMD ["python", "/app/script/train.py"]

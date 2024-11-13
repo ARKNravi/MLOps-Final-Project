@@ -1,8 +1,19 @@
 numpy
 torch
 torchvision
-tensorboard
-torchsummary
-matplotlib
+tensorboardX
 pillow
+matplotlib
+mlflow
+grafana-client
+torchsummary
+dvc[s3]
+distro
+cycler
+contourpy
+boto3          # Updated version
+s3transfer      # Updated version
+botocore       # Updated version
+six
+python-dateutil
 prometheus_client

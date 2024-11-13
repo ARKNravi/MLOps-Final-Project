@@ -1,0 +1,111 @@
+name: MLOps CI/CD Pipeline
+
+on:
+    push:
+        branches:
+            - main
+    pull_request:
+        branches:
+            - main
+
+jobs:
+    # Step 1: Build Base Image with Dependencies
+    build_and_cache_dependencies:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v2
+
+            - name: Log in to Docker Hub
+              uses: docker/login-action@v2
+              with:
+                  username: ${{ secrets.DOCKER_USERNAME }}
+                  password: ${{ secrets.DOCKER_PASSWORD }}
+
+            - name: Build and Push Dependency Image
+              run: |
+                  docker build -t ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest .
+                  docker push ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest
+
+    # Step 2: Training and Evaluating Model with Prometheus Metrics
+    train_and_evaluate:
+        runs-on: ubuntu-latest
+        needs: build_and_cache_dependencies
+        services:
+            # Setup Prometheus service
+            prometheus:
+                image: prom/prometheus:latest
+                ports:
+                    - 9090:9090
+                options: --config.file=./prometheus.yml
+
+            # Setup Grafana service
+            grafana:
+                image: grafana/grafana:latest
+                ports:
+                    - 3000:3000
+
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v2
+
+            - name: Pull and Run Dependency Image
+              env:
+                  SUPABASE_S3_ENDPOINT: ${{ secrets.SUPABASE_S3_ENDPOINT }}
+                  SUPABASE_S3_REGION: ${{ secrets.SUPABASE_S3_REGION }}
+                  SUPABASE_S3_ACCESS_KEY_ID: ${{ secrets.SUPABASE_S3_ACCESS_KEY_ID }}
+                  SUPABASE_S3_SECRET_ACCESS_KEY: ${{ secrets.SUPABASE_S3_SECRET_ACCESS_KEY }}
+              run: |
+                  docker pull ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest
+                  docker run --rm -v ${{ github.workspace }}:/app -w /app ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest bash -c "
+                    # Git configuration
+                    git config --global user.email 'actions@github.com' &&
+                    git config --global user.name 'GitHub Actions' &&
+                    
+                    # Stop tracking dataset and model folders with Git
+                    git rm -r --cached dataset || true &&
+                    git rm -r --cached model || true &&
+                    git commit -m 'Stop tracking dataset and model' --allow-empty &&
+                    
+                    # DVC setup and configuration
+                    dvc remote add -d supabase-s3 s3://MLOps --force &&
+                    dvc remote modify supabase-s3 endpointurl '$SUPABASE_S3_ENDPOINT' &&
+                    dvc remote modify supabase-s3 region '$SUPABASE_S3_REGION' &&
+                    dvc remote modify supabase-s3 access_key_id '$SUPABASE_S3_ACCESS_KEY_ID' &&
+                    dvc remote modify supabase-s3 secret_access_key '$SUPABASE_S3_SECRET_ACCESS_KEY' &&
+                    
+                    # Pull the dataset from the DVC remote
+                    dvc pull &&
+                    
+                    # Check dataset directory for debugging
+                    echo 'Contents of dataset/train directory:' &&
+                    ls /app/dataset/train &&
+                    
+                    # Run the training script
+                    python script/train.py &&
+                    
+                    # Push updated model and dataset changes back to DVC remote
+                    dvc push
+                  "
+
+    # Step 3: Build and Push Final Docker Image with Model
+    build_and_push_docker:
+        runs-on: ubuntu-latest
+        needs: train_and_evaluate
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v2
+
+            - name: Log in to Docker Hub
+              uses: docker/login-action@v2
+              with:
+                  username: ${{ secrets.DOCKER_USERNAME }}
+                  password: ${{ secrets.DOCKER_PASSWORD }}
+
+            - name: Build Docker Image with Model
+              run: |
+                  docker build -t ${{ secrets.DOCKER_USERNAME }}/mlops_project:latest .
+
+            - name: Push Docker Image
+              run: |
+                  docker push ${{ secrets.DOCKER_USERNAME }}/mlops_project:latest

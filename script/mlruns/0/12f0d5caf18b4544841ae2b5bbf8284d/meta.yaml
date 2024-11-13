@@ -1,0 +1,15 @@
+artifact_uri: file:///C:/Recovery/Project/MLOpsSemester5/project-akhir-mlops/script/mlruns/0/12f0d5caf18b4544841ae2b5bbf8284d/artifacts
+end_time: null
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 12f0d5caf18b4544841ae2b5bbf8284d
+run_name: stately-rook-364
+run_uuid: 12f0d5caf18b4544841ae2b5bbf8284d
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1731310314268
+status: 1
+tags: []
+user_id: rkunt

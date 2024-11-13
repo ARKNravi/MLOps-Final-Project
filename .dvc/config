@@ -1,0 +1,8 @@
+[core]
+    remote = supabase-s3
+['remote "supabase-s3"']
+    url = s3://MLOps
+    endpointurl = https://zyzahbhyrgrsakuwwdjr.supabase.co/storage/v1/s3
+    region = ap-southeast-1
+    access_key_id = 3815da64fc966cabfd6eb8983ea96b49
+    secret_access_key = e234e67f2b15e94f188c19ab550918e9d61a44f0b25dbdf92843a6adb74a85ff
