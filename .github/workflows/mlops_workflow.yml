@@ -41,19 +41,15 @@ jobs:
             - name: Checkout repository
               uses: actions/checkout@v2
 
-            - name: Set up Prometheus configuration and start Prometheus
+            - name: Set up Prometheus and start Prometheus
               run: |
-                  # Set up Prometheus configuration
-                  mkdir -p ./prometheus_config
-                  cp prometheus.yml ./prometheus_config/prometheus.yml
-
-                  # Stop and remove existing Prometheus container, if any
+                  # Stop and remove existing Prometheus container if any
                   docker stop prometheus || true
                   docker rm prometheus || true
 
-                  # Start Prometheus container
+                  # Start Prometheus container with prometheus.yml from the root
                   docker run -d --name prometheus -p 9090:9090 \
-                    -v $(pwd)/prometheus_config/prometheus.yml:/etc/prometheus/prometheus.yml prom/prometheus:latest
+                    -v $(pwd)/prometheus.yml:/etc/prometheus/prometheus.yml prom/prometheus:latest
 
             - name: Pull and Run Dependency Image
               env:
@@ -66,10 +62,10 @@ jobs:
                   n=0
                   until [ "$n" -ge 5 ]
                   do
-                      docker pull ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest && break
-                      n=$((n+1))
-                      echo "Retrying in 5 seconds..."
-                      sleep 5
+                    docker pull ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest && break
+                    n=$((n+1))
+                    echo "Retrying in 5 seconds..."
+                    sleep 5
                   done
 
                   # Run the Docker container with dependencies
