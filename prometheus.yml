@@ -7,4 +7,4 @@ remote_write:
     - url: "https://prometheus-prod-37-prod-ap-southeast-1.grafana.net/api/prom/push"
       basic_auth:
           username: "1902030" # Your Grafana Cloud Prometheus username
-          password: "glc_eyJvIjoiMTI3MzYzMSIsIm4iOiJzdGFjay0xMDkyNTE5LWhtLXdyaXRlLW1sb3BzIiwiayI6IjgxUkZOMmVManRndjRMNzUxNTE1Wkt3VCIsIm0iOnsiciI6InByb2QtYXAtc291dGhlYXN0LTEifX0=" # Your Grafana API token
+          password: "glc_eyJvIjoiMTI3MzYzMSIsIm4iOiJzdGFjay0xMDkyNTE5LWhtLXJlYWQtbWxvcHMiLCJrIjoieTNXdjIxWXEyOTZWUHcwYm5nNUlUNVk4IiwibSI6eyJyIjoicHJvZC1hcC1zb3V0aGVhc3QtMSJ9fQ==" # Your Grafana API token
