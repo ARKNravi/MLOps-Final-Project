@@ -1,55 +1,30 @@
-name: MLOps CI/CD Pipeline
+name: Test Grafana Cloud Integration
 
 on:
-  push:
-    branches:
-      - main
-  pull_request:
-    branches:
-      - main
+    push:
+        branches:
+            - main
 
 jobs:
-  train_and_evaluate:
-    runs-on: ubuntu-latest
-    services:
-      prometheus:
-        image: prom/prometheus:latest
-        ports:
-          - 9090:9090
-        volumes:
-          - /tmp/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    test_grafana:
+        runs-on: ubuntu-latest
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v2
-        with:
-          clean: true
+        steps:
+            - name: Checkout Repository
+              uses: actions/checkout@v2
 
-      - name: Fix Permissions
-        run: |
-          sudo chown -R $USER:$USER ${{ github.workspace }}
-          sudo chmod -R u+rw ${{ github.workspace }}
+            - name: Set up Python
+              uses: actions/setup-python@v4
+              with:
+                  python-version: "3.8"
 
-      - name: Prepare Prometheus Config
-        run: |
-          mkdir -p /tmp/prometheus
-          cp config/prometheus.yml /tmp/prometheus/prometheus.yml
+            - name: Install Dependencies
+              run: |
+                  python -m pip install --upgrade pip
+                  pip install -r requirements.txt
 
-      - name: Debug Prometheus Config Path
-        run: |
-          echo "Contents of /tmp/prometheus directory:"
-          ls -al /tmp/prometheus
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
-
-      - name: Install Dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Run Training Script
-        run: |
-          python script/train.py
+            - name: Run Training Script with Prometheus Metrics
+              env:
+                  PROMETHEUS_PUSH_GATEWAY: "https://prometheus-prod-37-prod-ap-southeast-1.grafana.net/api/prom/push"
+              run: |
+                  python script/train.py

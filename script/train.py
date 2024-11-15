@@ -10,22 +10,19 @@ import torch.optim as optim
 from torchvision import datasets, models, transforms
 from torch.optim import lr_scheduler
 from torchsummary import summary
-from prometheus_client import Gauge, start_http_server  # Prometheus client for monitoring
+from prometheus_client import Gauge, CollectorRegistry, push_to_gateway
 from PIL import Image
 
-# Start Prometheus client server on port 8000
-start_http_server(8000)
-
 # Define Prometheus metrics
-train_loss_metric = Gauge('train_loss', 'Training Loss')
-val_loss_metric = Gauge('val_loss', 'Validation Loss')
-train_accuracy_metric = Gauge('train_accuracy', 'Training Accuracy')
-val_accuracy_metric = Gauge('val_accuracy', 'Validation Accuracy')
+registry = CollectorRegistry()
+train_loss_metric = Gauge('train_loss', 'Training Loss', registry=registry)
+val_loss_metric = Gauge('val_loss', 'Validation Loss', registry=registry)
+train_accuracy_metric = Gauge('train_accuracy', 'Training Accuracy', registry=registry)
+val_accuracy_metric = Gauge('val_accuracy', 'Validation Accuracy', registry=registry)
 
 # Dataset paths
 train_dir = "/app/dataset/train"
 val_dir = "/app/dataset/val"
-test_dir = "/app/dataset/test"
 
 # Hyperparameters
 num_epochs = 1
@@ -114,6 +111,13 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs):
                 val_loss_metric.set(epoch_loss)
                 val_accuracy_metric.set(epoch_acc)
 
+            # Push metrics to Prometheus PushGateway
+            push_to_gateway(
+                os.getenv('PROMETHEUS_PUSH_GATEWAY', 'http://localhost:9091'), 
+                job='ml_training', 
+                registry=registry
+            )
+
             if phase == 'val' and epoch_acc > best_acc:
                 best_acc = epoch_acc
                 best_model_wts = copy.deepcopy(model.state_dict())
@@ -127,4 +131,9 @@ if __name__ == "__main__":
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
     exp_lr_scheduler = lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
+
+    # Set Prometheus PushGateway URL from environment variable
+    prometheus_push_gateway = os.getenv('PROMETHEUS_PUSH_GATEWAY', 'http://localhost:9091')
+    print(f"Pushing metrics to: {prometheus_push_gateway}")
+
     model = train_model(model, criterion, optimizer, exp_lr_scheduler, num_epochs)
