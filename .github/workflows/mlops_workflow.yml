@@ -26,18 +26,6 @@ jobs:
                   python -m pip install --upgrade pip
                   pip install -r requirements.txt
 
-            # Step 4: Ensure dataset is available (optional for debugging)
-            - name: Ensure Dataset Availability
-              run: |
-                  echo "Checking dataset structure..."
-                  ls -R ./dataset
-
-            # Step 5: Pull Dataset using DVC (if applicable)
-            - name: Pull Dataset Using DVC
-              run: |
-                  dvc pull
-                  ls -R ./dataset
-
             # Step 6: Run Training Script with Prometheus metrics and push to Grafana Cloud
             - name: Run Training Script with Prometheus Metrics
               env:
