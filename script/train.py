@@ -9,17 +9,19 @@ import torch.nn as nn
 import torch.optim as optim
 from torchvision import datasets, models, transforms
 from torch.optim import lr_scheduler
-from prometheus_client import Gauge, CollectorRegistry, push_to_gateway
+from prometheus_client import Gauge, CollectorRegistry, start_http_server
 from PIL import Image
-import base64
-import urllib.request
+
+# Start the Prometheus metrics HTTP server
+METRICS_PORT = 8000  # Choose an appropriate port
+start_http_server(METRICS_PORT)
+print(f"Starting Prometheus metrics server on port {METRICS_PORT}")
 
 # Define Prometheus metrics
-registry = CollectorRegistry()
-train_loss_metric = Gauge('train_loss', 'Training Loss', registry=registry)
-val_loss_metric = Gauge('val_loss', 'Validation Loss', registry=registry)
-train_accuracy_metric = Gauge('train_accuracy', 'Training Accuracy', registry=registry)
-val_accuracy_metric = Gauge('val_accuracy', 'Validation Accuracy', registry=registry)
+train_loss_metric = Gauge('train_loss', 'Training Loss')
+val_loss_metric = Gauge('val_loss', 'Validation Loss')
+train_accuracy_metric = Gauge('train_accuracy', 'Training Accuracy')
+val_accuracy_metric = Gauge('val_accuracy', 'Validation Accuracy')
 
 # Dataset paths
 base_dir = os.path.abspath("./dataset")
@@ -50,18 +52,18 @@ data_transforms = {
 }
 
 # Load datasets
-datasets = {
+datasets_dict = {
     'train': datasets.ImageFolder(train_dir, data_transforms['train']),
     'val': datasets.ImageFolder(val_dir, data_transforms['val'])
 }
 
 dataloaders = {
-    'train': data.DataLoader(datasets['train'], batch_size=batch_size, shuffle=True, num_workers=2),
-    'val': data.DataLoader(datasets['val'], batch_size=batch_size, shuffle=False, num_workers=2)
+    'train': data.DataLoader(datasets_dict['train'], batch_size=batch_size, shuffle=True, num_workers=2),
+    'val': data.DataLoader(datasets_dict['val'], batch_size=batch_size, shuffle=False, num_workers=2)
 }
 
-dataset_sizes = {x: len(datasets[x]) for x in ['train', 'val']}
-class_names = datasets['train'].classes
+dataset_sizes = {x: len(datasets_dict[x]) for x in ['train', 'val']}
+class_names = datasets_dict['train'].classes
 
 # Model initialization function
 def initialize_model(num_classes):
@@ -70,27 +72,10 @@ def initialize_model(num_classes):
     model_ft.fc = nn.Linear(num_ftrs, num_classes)
     return model_ft
 
-# Custom handler for basic authentication
-def custom_pushgateway_handler(url, method, timeout, headers, data):
-    username = "1902030"  # Ganti dengan username Grafana Cloud Anda
-    password = "glc_eyJvIjoiMTI3MzYzMSIsIm4iOiJzdGFjay0xMDkyNTE5LWhtLXJlYWQtbWxvcHMiLCJrIjoieTNXdjIxWXEyOTZWUHcwYm5nNUlUNVk4IiwibSI6eyJyIjoicHJvZC1hcC1zb3V0aGVhc3QtMSJ9fQ=="  # Ganti dengan API token Grafana Cloud Anda
-    # Create basic auth header
-    auth_value = f"{username}:{password}"
-    base64_auth = base64.b64encode(auth_value.encode('utf-8')).decode('utf-8')
-    headers['Authorization'] = f"Basic {base64_auth}"
-    # Build and send request
-    request = urllib.request.Request(url, data=data)
-    request.method = method
-    for key, value in headers.items():
-        request.add_header(key, value)
-    return urllib.request.urlopen(request, timeout=timeout)
-
 # Training function with Prometheus metrics
 def train_model(model, criterion, optimizer, scheduler, num_epochs):
     best_model_wts = copy.deepcopy(model.state_dict())
     best_acc = 0.0
-
-    prometheus_push_gateway = "https://prometheus-prod-37-prod-ap-southeast-1.grafana.net/api/prom/push"
 
     for epoch in range(num_epochs):
         print(f'Epoch {epoch}/{num_epochs - 1}')
@@ -130,14 +115,6 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs):
             elif phase == 'val':
                 val_loss_metric.set(epoch_loss)
                 val_accuracy_metric.set(epoch_acc)
-
-            # Push metrics to Grafana Cloud via custom handler
-            push_to_gateway(
-                prometheus_push_gateway,
-                job='ml_training',
-                registry=registry,
-                handler=custom_pushgateway_handler
-            )
 
             if phase == 'val' and epoch_acc > best_acc:
                 best_acc = epoch_acc
