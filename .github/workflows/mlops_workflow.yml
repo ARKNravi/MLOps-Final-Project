@@ -32,15 +32,14 @@ jobs:
                   python script/train.py &
               shell: bash
 
-            # Step 5: Install Grafana Agent
+            # Step 5: Download Grafana Agent
             - name: Download Grafana Agent
               run: |
-                  curl -O -L https://github.com/grafana/agent/releases/latest/download/agent-linux-amd64.zip
-                  unzip agent-linux-amd64.zip
-                  chmod +x agent-linux-amd64
+                  curl -L -o agent-linux-amd64.tar.gz https://github.com/grafana/agent/releases/latest/download/agent-linux-amd64.tar.gz
+                  tar -xzf agent-linux-amd64.tar.gz
+                  chmod +x ./agent-linux-amd64
 
             # Step 6: Configure Grafana Agent
-            # Create the configuration file
             - name: Configure Grafana Agent
               run: |
                   cat << EOF > agent-config.yaml
