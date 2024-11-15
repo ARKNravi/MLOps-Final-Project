@@ -10,7 +10,6 @@ import torch.optim as optim
 from torchvision import datasets, models, transforms
 from torch.optim import lr_scheduler
 from prometheus_client import Gauge, start_http_server
-from prometheus_client.exposition import basic_auth_handler
 from PIL import Image
 
 # Start the Prometheus metrics HTTP server on port 8000

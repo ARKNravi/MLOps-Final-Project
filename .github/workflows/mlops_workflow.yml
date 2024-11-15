@@ -29,7 +29,7 @@ jobs:
             # Start training script
             - name: Start Training Script
               run: |
-                  python script/train.py
+                  python train.py
               shell: bash
 
             # Download Grafana Agent
@@ -65,4 +65,4 @@ jobs:
             # Run Grafana Agent
             - name: Run Grafana Agent
               run: |
-                  ./grafana-agent-linux-amd64 --config.file=agent-config.yaml
+                  ./grafana-agent-linux-amd64 --config.file=prometheus.yml
