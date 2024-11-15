@@ -21,8 +21,10 @@ train_accuracy_metric = Gauge('train_accuracy', 'Training Accuracy', registry=re
 val_accuracy_metric = Gauge('val_accuracy', 'Validation Accuracy', registry=registry)
 
 # Dataset paths
-train_dir = "/app/dataset/train"
-val_dir = "/app/dataset/val"
+base_dir = os.path.abspath("./dataset")  # Ambil path absolut dari dataset
+train_dir = os.path.join(base_dir, "train")
+val_dir = os.path.join(base_dir, "val")
+test_dir = os.path.join(base_dir, "test")
 
 # Hyperparameters
 num_epochs = 1
