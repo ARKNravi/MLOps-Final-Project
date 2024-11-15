@@ -115,7 +115,7 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs):
 
             # Push metrics to Prometheus PushGateway
             push_to_gateway(
-                os.getenv('PROMETHEUS_PUSH_GATEWAY', 'http://localhost:9091'), 
+                os.getenv('PROMETHEUS_PUSH_GATEWAY', 'https://prometheus-prod-37-prod-ap-southeast-1.grafana.net/api/prom/push'), 
                 job='ml_training', 
                 registry=registry
             )
@@ -133,9 +133,5 @@ if __name__ == "__main__":
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
     exp_lr_scheduler = lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
-
-    # Set Prometheus PushGateway URL from environment variable
-    prometheus_push_gateway = os.getenv('PROMETHEUS_PUSH_GATEWAY', 'http://localhost:9091')
-    print(f"Pushing metrics to: {prometheus_push_gateway}")
 
     model = train_model(model, criterion, optimizer, exp_lr_scheduler, num_epochs)

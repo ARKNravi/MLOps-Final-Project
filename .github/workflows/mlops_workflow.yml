@@ -10,21 +10,37 @@ jobs:
         runs-on: ubuntu-latest
 
         steps:
+            # Step 1: Checkout the repository
             - name: Checkout Repository
               uses: actions/checkout@v2
 
+            # Step 2: Set up Python environment
             - name: Set up Python
               uses: actions/setup-python@v4
               with:
                   python-version: "3.8"
 
+            # Step 3: Install dependencies
             - name: Install Dependencies
               run: |
                   python -m pip install --upgrade pip
                   pip install -r requirements.txt
 
+            # Step 4: Ensure dataset is available (optional for debugging)
+            - name: Ensure Dataset Availability
+              run: |
+                  echo "Checking dataset structure..."
+                  ls -R ./dataset
+
+            # Step 5: Pull Dataset using DVC (if applicable)
+            - name: Pull Dataset Using DVC
+              run: |
+                  dvc pull
+                  ls -R ./dataset
+
+            # Step 6: Run Training Script with Prometheus metrics and push to Grafana Cloud
             - name: Run Training Script with Prometheus Metrics
               env:
-                  PROMETHEUS_PUSH_GATEWAY: "https://prometheus-prod-37-prod-ap-southeast-1.grafana.net/api/prom/push"
+                  PROMETHEUS_PUSH_GATEWAY: "https://prometheus-prod-37-prod-ap-southeast-1.grafana.net/api/prom/push" # Grafana Cloud URL
               run: |
                   python script/train.py
