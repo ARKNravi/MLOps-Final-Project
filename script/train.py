@@ -9,14 +9,14 @@ import torch.nn as nn
 import torch.optim as optim
 from torchvision import datasets, models, transforms
 from torch.optim import lr_scheduler
-from prometheus_client import Gauge, CollectorRegistry, start_http_server, generate_latest
+from prometheus_client import Gauge, start_http_server
 from prometheus_client.exposition import basic_auth_handler
 from PIL import Image
 
-# Start the Prometheus metrics HTTP server
-METRICS_PORT = 8000  # Choose an appropriate port
+# Start the Prometheus metrics HTTP server on port 8000
+METRICS_PORT = 8000
 start_http_server(METRICS_PORT)
-print(f"Starting Prometheus metrics server on port {METRICS_PORT}")
+print(f"Prometheus metrics server started on port {METRICS_PORT}")
 
 # Define Prometheus metrics
 train_loss_metric = Gauge('train_loss', 'Training Loss')
