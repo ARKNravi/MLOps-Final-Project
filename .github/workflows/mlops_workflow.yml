@@ -59,7 +59,7 @@ jobs:
                           - url: "https://prometheus-prod-37-prod-ap-southeast-1.grafana.net/api/prom/push"
                             basic_auth:
                               username: "1902030"  # Replace with your Grafana Cloud username
-                              password: "glc_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"  # Replace with your Grafana Cloud API token
+                              password: "glc_eyJvIjoiMTI3MzYzMSIsIm4iOiJzdGFjay0xMDkyNTE5LWhtLXJlYWQtbWxvcHMiLCJrIjoieTNXdjIxWXEyOTZWUHcwYm5nNUlUNVk4IiwibSI6eyJyIjoicHJvZC1hcC1zb3V0aGVhc3QtMSJ9fQ=="  # Replace with your Grafana Cloud API token
                   EOF
 
             # Step 7: Start Grafana Agent
