@@ -36,6 +36,8 @@ jobs:
             - name: Download Grafana Agent
               run: |
                   curl -L -o agent-linux-amd64.tar.gz https://github.com/grafana/agent/releases/download/v0.36.2/agent-linux-amd64.tar.gz
+                  file agent-linux-amd64.tar.gz
+                  ls -l agent-linux-amd64.tar.gz
                   tar -xzf agent-linux-amd64.tar.gz
                   chmod +x ./agent-linux-amd64
 
