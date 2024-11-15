@@ -2,9 +2,8 @@ global:
     scrape_interval: 5s
     evaluation_interval: 5s
 
-# Replace with your Grafana Cloud remote write URL and credentials
 remote_write:
     - url: "https://prometheus-prod-37-prod-ap-southeast-1.grafana.net/api/prom/push"
       basic_auth:
-          username: "1902030" # Your Grafana Cloud Prometheus username
-          password: "glc_eyJvIjoiMTI3MzYzMSIsIm4iOiJzdGFjay0xMDkyNTE5LWhtLXJlYWQtbWxvcHMiLCJrIjoieTNXdjIxWXEyOTZWUHcwYm5nNUlUNVk4IiwibSI6eyJyIjoicHJvZC1hcC1zb3V0aGVhc3QtMSJ9fQ==" # Your Grafana API token
+          username: "1902030" # Grafana Cloud Prometheus username Anda
+          password: "glc_eyJvIjoiMTI3MzYzMSIsIm4iOiJzdGFjay0xMDkyNTE5LWhtLXJlYWQtbWxvcHMiLCJrIjoieTNXdjIxWXEyOTZWUHcwYm5nNUlUNVk4IiwibSI6eyJyIjoicHJvZC1hcC1zb3V0aGVhc3QtMSJ9fQ==" # Grafana Cloud API token Anda

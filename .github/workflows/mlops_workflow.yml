@@ -9,115 +9,41 @@ on:
             - main
 
 jobs:
-    # Step 1: Build Base Image with Dependencies
-    build_and_cache_dependencies:
-        runs-on: ubuntu-latest
-        steps:
-            - name: Checkout repository
-              uses: actions/checkout@v2
-
-            - name: Log in to Docker Hub
-              uses: docker/login-action@v2
-              with:
-                  username: ${{ secrets.DOCKER_USERNAME }}
-                  password: ${{ secrets.DOCKER_PASSWORD }}
-
-            - name: Build and Push Dependency Image
-              run: |
-                  docker build -t ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest .
-                  docker push ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest
-
-    # Step 2: Training and Evaluating Model with Prometheus and Grafana
     train_and_evaluate:
         runs-on: ubuntu-latest
-        needs: build_and_cache_dependencies
         services:
-            grafana:
-                image: grafana/grafana:latest
+            prometheus:
+                image: prom/prometheus:latest
                 ports:
-                    - 3000:3000
+                    - 9090:9090
+                volumes:
+                    - ./prometheus.yml:/etc/prometheus/prometheus.yml
 
         steps:
             - name: Checkout repository
               uses: actions/checkout@v2
 
-            - name: Set up Prometheus and start Prometheus
+            - name: Install Python and Dependencies
               run: |
-                  # Stop and remove existing Prometheus container if any
-                  docker stop prometheus || true
-                  docker rm prometheus || true
+                  python -m pip install --upgrade pip
+                  pip install prometheus_client torch torchvision
 
-                  # Start Prometheus container with prometheus.yml from the root
-                  docker run -d --name prometheus -p 9090:9090 \
-                    -v $(pwd)/prometheus.yml:/etc/prometheus/prometheus.yml prom/prometheus:latest
-
-            - name: Pull and Run Dependency Image
+            - name: Run Training Script
               env:
+                  # Tambahkan ENV untuk DVC jika digunakan
                   SUPABASE_S3_ENDPOINT: ${{ secrets.SUPABASE_S3_ENDPOINT }}
                   SUPABASE_S3_REGION: ${{ secrets.SUPABASE_S3_REGION }}
                   SUPABASE_S3_ACCESS_KEY_ID: ${{ secrets.SUPABASE_S3_ACCESS_KEY_ID }}
                   SUPABASE_S3_SECRET_ACCESS_KEY: ${{ secrets.SUPABASE_S3_SECRET_ACCESS_KEY }}
               run: |
-                  # Pull the Docker dependency image with retry mechanism to avoid temporary network issues
-                  n=0
-                  until [ "$n" -ge 5 ]
-                  do
-                    docker pull ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest && break
-                    n=$((n+1))
-                    echo "Retrying in 5 seconds..."
-                    sleep 5
-                  done
+                  python script/train.py
 
-                  # Run the Docker container with dependencies
-                  docker run --rm -v ${{ github.workspace }}:/app -w /app ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest bash -c "
-                    # Git configuration
-                    git config --global user.email 'actions@github.com' &&
-                    git config --global user.name 'GitHub Actions' &&
-                    
-                    # Stop tracking dataset and model folders with Git
-                    git rm -r --cached dataset || true &&
-                    git rm -r --cached model || true &&
-                    git commit -m 'Stop tracking dataset and model' --allow-empty &&
-                    
-                    # DVC setup and configuration
-                    dvc remote add -d supabase-s3 s3://MLOps --force &&
-                    dvc remote modify supabase-s3 endpointurl '$SUPABASE_S3_ENDPOINT' &&
-                    dvc remote modify supabase-s3 region '$SUPABASE_S3_REGION' &&
-                    dvc remote modify supabase-s3 access_key_id '$SUPABASE_S3_ACCESS_KEY_ID' &&
-                    dvc remote modify supabase-s3 secret_access_key '$SUPABASE_S3_SECRET_ACCESS_KEY' &&
-                    
-                    # Pull the dataset from the DVC remote
-                    dvc pull &&
-                    
-                    # Check dataset directory for debugging
-                    echo 'Contents of dataset/train directory:' &&
-                    ls /app/dataset/train &&
-                    
-                    # Run the training script
-                    python script/train.py &&
-                    
-                    # Push updated model and dataset changes back to DVC remote
-                    dvc push
-                  "
-
-    # Step 3: Build and Push Final Docker Image with Model
-    build_and_push_docker:
-        runs-on: ubuntu-latest
-        needs: train_and_evaluate
-        steps:
-            - name: Checkout repository
-              uses: actions/checkout@v2
-
-            - name: Log in to Docker Hub
-              uses: docker/login-action@v2
-              with:
-                  username: ${{ secrets.DOCKER_USERNAME }}
-                  password: ${{ secrets.DOCKER_PASSWORD }}
-
-            - name: Build Docker Image with Model
+            - name: Debug Prometheus Remote Write
               run: |
-                  docker build -t ${{ secrets.DOCKER_USERNAME }}/mlops_project:latest .
+                  curl -X POST -H "Authorization: Basic $(echo -n '1902030:glc_eyJvIjoi...' | base64)" \
+                    "https://prometheus-prod-37-prod-ap-southeast-1.grafana.net/api/prom/push" \
+                    -d 'Checking Prometheus push status'
 
-            - name: Push Docker Image
+            - name: Check Prometheus Logs
               run: |
-                  docker push ${{ secrets.DOCKER_USERNAME }}/mlops_project:latest
+                  docker logs prometheus

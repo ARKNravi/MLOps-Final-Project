@@ -1,0 +1,20 @@
+server:
+    http_listen_port: 9080 # Promtail's HTTP port
+    grpc_listen_port: 0
+
+positions:
+    filename: /tmp/positions.yaml # Where Promtail stores its position in log files
+
+clients:
+    - url: https://logs-prod-020.grafana.net/loki/api/v1/push
+      basic_auth:
+          username: "1050298" # Your Grafana Cloud Loki username
+          password: "glc_eyJvIjoiMTI3MzYzMSIsIm4iOiJzdGFjay0xMDkyNTE5LWhsLXdyaXRlLW1sb3BzIiwiayI6Ik1TUzNUeTkyMm96TDQzd1RjNmM2MDV2aCIsIm0iOnsiciI6InByb2QtYXAtc291dGhlYXN0LTEifX0=" # Your Grafana API Token
+
+scrape_configs:
+    - job_name: "github_action_logs"
+      static_configs:
+          - targets: ["localhost"] # No need for an actual target since we're scraping local files
+            labels:
+                job: github_actions
+                __path__: /app/logs/*.log # Path to log files created in the workflow
