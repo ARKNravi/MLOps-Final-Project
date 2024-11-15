@@ -32,10 +32,10 @@ jobs:
                   python script/train.py &
               shell: bash
 
-            # Step 5: Download Grafana Agent
+            # Step 5: Download Grafana Agent (corrected URL)
             - name: Download Grafana Agent
               run: |
-                  curl -L -o agent-linux-amd64.tar.gz https://github.com/grafana/agent/releases/latest/download/agent-linux-amd64.tar.gz
+                  curl -L -o agent-linux-amd64.tar.gz https://github.com/grafana/agent/releases/download/v0.36.2/agent-linux-amd64.tar.gz
                   tar -xzf agent-linux-amd64.tar.gz
                   chmod +x ./agent-linux-amd64
 
@@ -68,7 +68,7 @@ jobs:
                   ./agent-linux-amd64 --config.file=agent-config.yaml &
               shell: bash
 
-            # Step 8: Wait for training to complete
+            # Step 8: Wait for Training to Complete
             - name: Wait for Training Completion
               run: |
                   wait # Waits for all background processes to finish
