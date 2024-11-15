@@ -9,9 +9,10 @@ import torch.nn as nn
 import torch.optim as optim
 from torchvision import datasets, models, transforms
 from torch.optim import lr_scheduler
-from torchsummary import summary
 from prometheus_client import Gauge, CollectorRegistry, push_to_gateway
 from PIL import Image
+import base64
+import urllib.request
 
 # Define Prometheus metrics
 registry = CollectorRegistry()
@@ -21,7 +22,7 @@ train_accuracy_metric = Gauge('train_accuracy', 'Training Accuracy', registry=re
 val_accuracy_metric = Gauge('val_accuracy', 'Validation Accuracy', registry=registry)
 
 # Dataset paths
-base_dir = os.path.abspath("./dataset")  # Ambil path absolut dari dataset
+base_dir = os.path.abspath("./dataset")
 train_dir = os.path.join(base_dir, "train")
 val_dir = os.path.join(base_dir, "val")
 test_dir = os.path.join(base_dir, "test")
@@ -55,8 +56,8 @@ datasets = {
 }
 
 dataloaders = {
-    'train': data.DataLoader(datasets['train'], batch_size=batch_size, shuffle=True, num_workers=4),
-    'val': data.DataLoader(datasets['val'], batch_size=batch_size, shuffle=False, num_workers=4)
+    'train': data.DataLoader(datasets['train'], batch_size=batch_size, shuffle=True, num_workers=2),
+    'val': data.DataLoader(datasets['val'], batch_size=batch_size, shuffle=False, num_workers=2)
 }
 
 dataset_sizes = {x: len(datasets[x]) for x in ['train', 'val']}
@@ -69,10 +70,27 @@ def initialize_model(num_classes):
     model_ft.fc = nn.Linear(num_ftrs, num_classes)
     return model_ft
 
+# Custom handler for basic authentication
+def custom_pushgateway_handler(url, method, timeout, headers, data):
+    username = "1902030"  # Ganti dengan username Grafana Cloud Anda
+    password = "glc_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxglc_eyJvIjoiMTI3MzYzMSIsIm4iOiJzdGFjay0xMDkyNTE5LWhtLXJlYWQtbWxvcHMiLCJrIjoieTNXdjIxWXEyOTZWUHcwYm5nNUlUNVk4IiwibSI6eyJyIjoicHJvZC1hcC1zb3V0aGVhc3QtMSJ9fQ=="  # Ganti dengan API token Grafana Cloud Anda
+    # Create basic auth header
+    auth_value = f"{username}:{password}"
+    base64_auth = base64.b64encode(auth_value.encode('utf-8')).decode('utf-8')
+    headers['Authorization'] = f"Basic {base64_auth}"
+    # Build and send request
+    request = urllib.request.Request(url, data=data)
+    request.method = method
+    for key, value in headers.items():
+        request.add_header(key, value)
+    return urllib.request.urlopen(request, timeout=timeout)
+
 # Training function with Prometheus metrics
 def train_model(model, criterion, optimizer, scheduler, num_epochs):
     best_model_wts = copy.deepcopy(model.state_dict())
     best_acc = 0.0
+
+    prometheus_push_gateway = "https://prometheus-prod-37-prod-ap-southeast-1.grafana.net/api/prom/push"
 
     for epoch in range(num_epochs):
         print(f'Epoch {epoch}/{num_epochs - 1}')
@@ -113,11 +131,12 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs):
                 val_loss_metric.set(epoch_loss)
                 val_accuracy_metric.set(epoch_acc)
 
-            # Push metrics to Prometheus PushGateway
+            # Push metrics to Grafana Cloud via custom handler
             push_to_gateway(
-                os.getenv('PROMETHEUS_PUSH_GATEWAY', 'https://prometheus-prod-37-prod-ap-southeast-1.grafana.net/api/prom/push'), 
-                job='ml_training', 
-                registry=registry
+                prometheus_push_gateway,
+                job='ml_training',
+                registry=registry,
+                handler=custom_pushgateway_handler
             )
 
             if phase == 'val' and epoch_acc > best_acc:
