@@ -17,20 +17,22 @@ jobs:
                 ports:
                     - 9090:9090
                 volumes:
-                    - $(pwd)/prometheus.yml:/etc/prometheus/prometheus.yml
+                    - ${{ github.workspace }}/prometheus.yml:/etc/prometheus/prometheus.yml
 
         steps:
             # Step 1: Checkout Repository
             - name: Checkout repository
               uses: actions/checkout@v2
 
-            # Step 2: Debug File Paths
-            - name: Debug File Paths
+            # Step 2: Debug File Path
+            - name: Debug Prometheus Config Path
               run: |
-                  echo "Contents of root directory:"
-                  ls -al ${GITHUB_WORKSPACE}
-                  echo "Checking if prometheus.yml exists:"
-                  test -f ${GITHUB_WORKSPACE}/prometheus.yml && echo "prometheus.yml exists" || echo "prometheus.yml not found"
+                  echo "Current working directory:"
+                  pwd
+                  echo "Contents of workspace:"
+                  ls -al ${{ github.workspace }}
+                  echo "Checking prometheus.yml file:"
+                  if [ -f ${{ github.workspace }}/prometheus.yml ]; then echo "prometheus.yml found"; else echo "prometheus.yml not found"; fi
 
             # Step 3: Set up Python and Install Dependencies
             - name: Set up Python
