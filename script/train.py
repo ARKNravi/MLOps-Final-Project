@@ -73,7 +73,7 @@ def initialize_model(num_classes):
 # Custom handler for basic authentication
 def custom_pushgateway_handler(url, method, timeout, headers, data):
     username = "1902030"  # Ganti dengan username Grafana Cloud Anda
-    password = "glc_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxglc_eyJvIjoiMTI3MzYzMSIsIm4iOiJzdGFjay0xMDkyNTE5LWhtLXJlYWQtbWxvcHMiLCJrIjoieTNXdjIxWXEyOTZWUHcwYm5nNUlUNVk4IiwibSI6eyJyIjoicHJvZC1hcC1zb3V0aGVhc3QtMSJ9fQ=="  # Ganti dengan API token Grafana Cloud Anda
+    password = "glc_eyJvIjoiMTI3MzYzMSIsIm4iOiJzdGFjay0xMDkyNTE5LWhtLXJlYWQtbWxvcHMiLCJrIjoieTNXdjIxWXEyOTZWUHcwYm5nNUlUNVk4IiwibSI6eyJyIjoicHJvZC1hcC1zb3V0aGVhc3QtMSJ9fQ=="  # Ganti dengan API token Grafana Cloud Anda
     # Create basic auth header
     auth_value = f"{username}:{password}"
     base64_auth = base64.b64encode(auth_value.encode('utf-8')).decode('utf-8')
