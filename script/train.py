@@ -9,7 +9,8 @@ import torch.nn as nn
 import torch.optim as optim
 from torchvision import datasets, models, transforms
 from torch.optim import lr_scheduler
-from prometheus_client import Gauge, CollectorRegistry, start_http_server
+from prometheus_client import Gauge, CollectorRegistry, start_http_server, generate_latest
+from prometheus_client.exposition import basic_auth_handler
 from PIL import Image
 
 # Start the Prometheus metrics HTTP server
@@ -130,4 +131,5 @@ if __name__ == "__main__":
     optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
     exp_lr_scheduler = lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
 
-    model = train_model(model, criterion, optimizer, exp_lr_scheduler, num_epochs)
+    # Start training
+    model_trained = train_model(model, criterion, optimizer, exp_lr_scheduler, num_epochs)

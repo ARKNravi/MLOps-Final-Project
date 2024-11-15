@@ -26,10 +26,10 @@ jobs:
                   python -m pip install --upgrade pip
                   pip install -r requirements.txt
 
-            # Step 4: Start the application in the background
+            # Step 4: Start Training Script in Foreground (without background)
             - name: Start Training Script
               run: |
-                  python script/train.py &
+                  python script/train.py
               shell: bash
 
             # Step 5: Download Grafana Agent
@@ -68,8 +68,10 @@ jobs:
                   ./grafana-agent-linux-amd64 --config.file=agent-config.yaml &
               shell: bash
 
-            # Step 8: Wait for Training to Complete
-            - name: Wait for Training Completion
+            # Step 8: Check Logs to Debug Metrics Push
+            - name: Check Logs for Metrics Push
               run: |
-                  wait # Waits for all background processes to finish
+                  curl -X GET "https://prometheus-prod-37-prod-ap-southeast-1.grafana.net/api/v1/query" \
+                  -H "Authorization: Bearer glc_eyJvIjoiMTI3MzYzMSIsIm4iOiJzdGFjay0xMDkyNTE5LWhtLXJlYWQtbWxvcHMiLCJrIjoieTNXdjIxWXEyOTZWUHcwYm5nNUlUNVk4IiwibSI6eyJyIjoicHJvZC1hcC1zb3V0aGVhc3QtMSJ9fQ==" \
+                  -d 'query=train_loss'
               shell: bash
