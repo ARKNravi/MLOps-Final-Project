@@ -4,7 +4,7 @@ torchvision
 tensorboardX
 pillow
 matplotlib
-mlflow
+mlflow==2.17.2
 grafana-client
 torchsummary
 dvc[s3]

@@ -1,0 +1,80 @@
+{
+    "annotations": {
+        "list": [
+            {
+                "builtIn": 1,
+                "datasource": "-- Grafana --",
+                "enable": true,
+                "hide": true,
+                "iconColor": "rgba(0, 211, 255, 1)",
+                "name": "Annotations & Alerts",
+                "type": "dashboard"
+            }
+        ]
+    },
+    "title": "Training Dashboard",
+    "panels": [
+        {
+            "type": "graph",
+            "title": "Training Loss",
+            "targets": [
+                {
+                    "expr": "train_loss",
+                    "legendFormat": "Training Loss",
+                    "refId": "A"
+                }
+            ],
+            "id": 1
+        },
+        {
+            "type": "graph",
+            "title": "Validation Loss",
+            "targets": [
+                {
+                    "expr": "val_loss",
+                    "legendFormat": "Validation Loss",
+                    "refId": "A"
+                }
+            ],
+            "id": 2
+        },
+        {
+            "type": "graph",
+            "title": "Training Accuracy",
+            "targets": [
+                {
+                    "expr": "train_accuracy",
+                    "legendFormat": "Training Accuracy",
+                    "refId": "A"
+                }
+            ],
+            "id": 3
+        },
+        {
+            "type": "graph",
+            "title": "Validation Accuracy",
+            "targets": [
+                {
+                    "expr": "val_accuracy",
+                    "legendFormat": "Validation Accuracy",
+                    "refId": "A"
+                }
+            ],
+            "id": 4
+        },
+        {
+            "type": "logs",
+            "title": "Application Logs",
+            "datasource": "Loki",
+            "targets": [
+                {
+                    "expr": "{job=\"docker\"}",
+                    "refId": "A"
+                }
+            ],
+            "id": 5
+        }
+    ],
+    "schemaVersion": 30,
+    "version": 1
+}

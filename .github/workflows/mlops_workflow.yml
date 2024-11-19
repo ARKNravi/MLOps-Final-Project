@@ -1,68 +1,136 @@
-name: Test Grafana Cloud Integration
+name: MLOps CI/CD Pipeline
 
 on:
     push:
         branches:
             - main
+    pull_request:
+        branches:
+            - main
 
 jobs:
-    test_grafana:
+    # Step 1: Build Base Image with Dependencies
+    build_and_cache_dependencies:
         runs-on: ubuntu-latest
-
         steps:
-            # Checkout the repository
-            - name: Checkout Repository
+            - name: Checkout repository
               uses: actions/checkout@v2
 
-            # Set up Python environment
-            - name: Set up Python
-              uses: actions/setup-python@v4
+            - name: Log in to Docker Hub
+              uses: docker/login-action@v2
               with:
-                  python-version: "3.8"
+                  username: ${{ secrets.DOCKER_USERNAME }}
+                  password: ${{ secrets.DOCKER_PASSWORD }}
 
-            # Install dependencies
-            - name: Install Dependencies
+            - name: Build and Push Dependency Image
               run: |
-                  python -m pip install --upgrade pip
-                  pip install -r requirements.txt
+                  docker build -t ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest .
+                  docker push ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest
 
-            # Start training script
-            - name: Start Training Script
-              run: |
-                  python script/train.py
-              shell: bash
+    # Step 2: Training and Evaluating Model with Prometheus and Grafana
+    train_and_evaluate:
+        runs-on: ubuntu-latest
+        needs: build_and_cache_dependencies
+        services:
+            grafana:
+                image: grafana/grafana:latest
+                ports:
+                    - 3000:3000
+            mlflow:
+                image: ghcr.io/mlflow/mlflow:v2.18.0rc0
+                ports:
+                  - 5000:5000
 
-            # Download Grafana Agent
-            - name: Download Grafana Agent
-              run: |
-                  curl -L -o agent-linux-amd64.zip https://github.com/grafana/agent/releases/download/v0.43.3/grafana-agent-linux-amd64.zip
-                  unzip agent-linux-amd64.zip
-                  chmod +x ./grafana-agent-linux-amd64
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v2
 
-            # Configure Grafana Agent
-            - name: Configure Grafana Agent
+            # Set up Prometheus configuration directory and remove existing Prometheus container if exists
+            - name: Set up Prometheus configuration and start Prometheus
               run: |
-                  cat << EOF > agent-config.yaml
-                  server:
-                    log_level: info
-                  prometheus:
-                    wal_directory: ./data-agent
-                    global:
-                      scrape_interval: 5s
-                    configs:
-                      - name: default
-                        scrape_configs:
-                          - job_name: 'ml_training_job'
-                            static_configs:
-                              - targets: ['localhost:8000']  # Scrape from local Prometheus server
-                    remote_write:
-                      - url: "https://prometheus-prod-37-prod-ap-southeast-1.grafana.net/api/prom/push"
-                        basic_auth:
-                          username: "1902030"
-                          password: "glc_eyJvIjoiMTI3MzYzMSIsIm4iOiJzdGFjay0xMDkyNTE5LWhtLXJlYWQtbWxvcHMiLCJrIjoieTNXdjIxWXEyOTZWUHcwYm5nNUlUNVk4IiwibSI6eyJyIjoicHJvZC1hcC1zb3V0aGVhc3QtMSJ9fQ=="
-                  EOF
+                  # Set up Prometheus configuration
+                  mkdir -p ./prometheus_config
+                  cp prometheus.yml ./prometheus_config/prometheus.yml
 
-            # Run Grafana Agent
-            - name: Run Grafana Agent
+                  # Stop and remove existing Prometheus container, if any
+                  docker stop prometheus || true
+                  docker rm prometheus || true
+
+                  # Start Prometheus container
+                  docker run -d --name prometheus -p 9090:9090 \
+                    -v $(pwd)/prometheus_config/prometheus.yml:/etc/prometheus/prometheus.yml prom/prometheus:latest
+
+            - name: Pull and Run Dependency Image
+              env:
+                  SUPABASE_S3_ENDPOINT: ${{ secrets.SUPABASE_S3_ENDPOINT }}
+                  SUPABASE_S3_REGION: ${{ secrets.SUPABASE_S3_REGION }}
+                  SUPABASE_S3_ACCESS_KEY_ID: ${{ secrets.SUPABASE_S3_ACCESS_KEY_ID }}
+                  SUPABASE_S3_SECRET_ACCESS_KEY: ${{ secrets.SUPABASE_S3_SECRET_ACCESS_KEY }}
+                  MLFLOW_TRACKING_URI: http://localhost:5000
               run: |
-                  ./grafana-agent-linux-amd64 --config.file=prometheus.yml
+                  # Pull the Docker dependency image with retry mechanism to avoid temporary network issues
+                  n=0
+                  until [ "$n" -ge 5 ]
+                  do
+                      docker pull ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest && break
+                      n=$((n+1))
+                      echo "Retrying in 5 seconds..."
+                      sleep 5
+                  done
+
+                  # Run the Docker container with dependencies
+                  docker run --rm -v ${{ github.workspace }}:/app -w /app ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest bash -c "
+                    # Git configuration
+                    git config --global user.email 'actions@github.com' &&
+                    git config --global user.name 'GitHub Actions' &&
+                    
+                    # Stop tracking dataset and model folders with Git
+                    git rm -r --cached dataset || true &&
+                    git rm -r --cached model || true &&
+                    git commit -m 'Stop tracking dataset and model' --allow-empty &&
+                    
+                    # DVC setup and configuration
+                    dvc remote add -d supabase-s3 s3://MLOps --force &&
+                    dvc remote modify supabase-s3 endpointurl '$SUPABASE_S3_ENDPOINT' &&
+                    dvc remote modify supabase-s3 region '$SUPABASE_S3_REGION' &&
+                    dvc remote modify supabase-s3 access_key_id '$SUPABASE_S3_ACCESS_KEY_ID' &&
+                    dvc remote modify supabase-s3 secret_access_key '$SUPABASE_S3_SECRET_ACCESS_KEY' &&
+                    
+                    # Pull the dataset from the DVC remote
+                    dvc pull &&
+                    
+                    # Check dataset directory for debugging
+                    echo 'Contents of dataset/train directory:' &&
+                    ls /app/dataset/train &&
+                    
+                    # Run the training script
+                    python script/train.py &&
+                    
+                    # Push updated model and dataset changes back to DVC remote
+                    dvc push &&
+
+                    # Run the test script
+                    python script/test.py
+                  "
+
+    # Step 3: Build and Push Final Docker Image with Model
+    build_and_push_docker:
+        runs-on: ubuntu-latest
+        needs: train_and_evaluate
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v2
+
+            - name: Log in to Docker Hub
+              uses: docker/login-action@v2
+              with:
+                  username: ${{ secrets.DOCKER_USERNAME }}
+                  password: ${{ secrets.DOCKER_PASSWORD }}
+
+            - name: Build Docker Image with Model
+              run: |
+                  docker build -t ${{ secrets.DOCKER_USERNAME }}/mlops_project:latest .
+
+            - name: Push Docker Image
+              run: |
+                  docker push ${{ secrets.DOCKER_USERNAME }}/mlops_project:latest

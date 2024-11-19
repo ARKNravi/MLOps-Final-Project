@@ -1,15 +1,13 @@
-metrics:
-  global:
-    scrape_interval: 5s
-  configs:
-  - name: 'ml_training_metrics'
-    scrape_configs:
-      - job_name: 'ml_training_job'
-        static_configs:
-        - targets: ['localhost:8000']
+# prometheus.yml
 
-    remote_write:
-      - url: "https://prometheus-prod-37-prod-ap-southeast-1.grafana.net/api/prom/push"
-        basic_auth:
-          username: "1902030"
-          password: "glc_eyJvIjoiMTI3MzYzMSIsIm4iOiJzdGFjay0xMDkyNTE5LWhtLXJlYWQtbWxvcHMiLCJrIjoieTNXdjIxWXEyOTZWUHcwYm5nNUlUNVk4IiwibSI6eyJyIjoicHJvZC1hcC1zb3V0aGVhc3QtMSJ9fQ=="
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: 'train'
+    static_configs:
+      - targets: ['train:8000']

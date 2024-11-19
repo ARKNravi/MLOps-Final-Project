@@ -1,20 +1,21 @@
 server:
-    http_listen_port: 9080 # Promtail's HTTP port
-    grpc_listen_port: 0
+  http_listen_port: 9080
+  grpc_listen_port: 0
 
 positions:
-    filename: /tmp/positions.yaml # Where Promtail stores its position in log files
+  filename: /tmp/positions.yaml
 
 clients:
-    - url: https://logs-prod-020.grafana.net/loki/api/v1/push
-      basic_auth:
-          username: "1050298" # Your Grafana Cloud Loki username
-          password: "glc_eyJvIjoiMTI3MzYzMSIsIm4iOiJzdGFjay0xMDkyNTE5LWhsLXdyaXRlLW1sb3BzIiwiayI6Ik1TUzNUeTkyMm96TDQzd1RjNmM2MDV2aCIsIm0iOnsiciI6InByb2QtYXAtc291dGhlYXN0LTEifX0=" # Your Grafana API Token
+  - url: http://loki:3100/loki/api/v1/push
 
 scrape_configs:
-    - job_name: "github_action_logs"
-      static_configs:
-          - targets: ["localhost"] # No need for an actual target since we're scraping local files
-            labels:
-                job: github_actions
-                __path__: /app/logs/*.log # Path to log files created in the workflow
+  - job_name: docker
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+    relabel_configs:
+      - source_labels: ['__meta_docker_container_name']
+        regex: '/(.*)'
+        target_label: 'container'
+      - source_labels: ['__meta_docker_container_log_stream']
+        target_label: 'logstream'
