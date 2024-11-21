@@ -1,32 +1,68 @@
-#!/usr/bin/env bash
-set -e
+#!/bin/bash
+# wait-for-it.sh
 
-# Check for netcat dependency
-if ! command -v nc >/dev/null 2>&1; then
-  echo "Error: 'nc' (Netcat) command not found. Please install it in your container."
-  exit 1
-fi
+# Function to print usage
+usage() {
+    echo "Usage: $0 host:port [-t timeout] [-- command args]"
+    exit 1
+}
 
-# Argument Parsing
-HOST=$1
-PORT=$2
-TIMEOUT=${3:-30}
+# Parse arguments
+HOST=""
+PORT=""
+TIMEOUT=120
+COMMAND=()
 
-if [ -z "$HOST" ] || [ -z "$PORT" ]; then
-  echo "Usage: $0 <host> <port> [timeout]"
-  exit 1
-fi
-
-echo "Waiting for $HOST:$PORT for up to $TIMEOUT seconds..."
-
-# Loop to check if the host and port are available
-for i in $(seq 1 $TIMEOUT); do
-  if nc -z "$HOST" "$PORT"; then
-    echo "$HOST:$PORT is available!"
-    exit 0
-  fi
-  sleep 1
+# Process arguments
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        *:*)
+            HOST=$(echo "$1" | cut -d: -f1)
+            PORT=$(echo "$1" | cut -d: -f2)
+            shift
+            ;;
+        -t)
+            TIMEOUT="$2"
+            shift 2
+            ;;
+        --)
+            shift
+            COMMAND=("$@")
+            break
+            ;;
+        *)
+            usage
+            ;;
+    esac
 done
 
-echo "Timeout reached: $HOST:$PORT is not available"
-exit 1
+# Validate host and port
+if [[ -z "$HOST" || -z "$PORT" ]]; then
+    usage
+fi
+
+# Wait for the service to be available
+start_time=$(date +%s)
+while true; do
+    # Check if the service is reachable
+    nc -z -w5 "$HOST" "$PORT"
+    if [ $? -eq 0 ]; then
+        echo "$HOST:$PORT is available"
+        break
+    fi
+
+    # Check for timeout
+    current_time=$(date +%s)
+    elapsed_time=$((current_time - start_time))
+    if [ $elapsed_time -ge $TIMEOUT ]; then
+        echo "Timeout: $HOST:$PORT not available after $TIMEOUT seconds"
+        exit 1
+    fi
+
+    sleep 5
+done
+
+# Execute the command if provided
+if [ ${#COMMAND[@]} -gt 0 ]; then
+    exec "${COMMAND[@]}"
+fi

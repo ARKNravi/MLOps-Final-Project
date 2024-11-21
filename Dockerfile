@@ -29,5 +29,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/metrics || exit 1
 
-# Set the default command with corrected timeout flag
-ENTRYPOINT ["./wait-for-it.sh", "mlflow:5000", "-t", "120", "--", "python", "/app/script/train.py"]
+# Set the default command with corrected host:port format
+ENTRYPOINT ["/app/wait-for-it.sh", "mlflow:5000", "-t", "120", "--", "python", "/app/script/train.py"]

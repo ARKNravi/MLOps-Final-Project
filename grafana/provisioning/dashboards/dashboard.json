@@ -12,7 +12,7 @@
             }
         ]
     },
-    "title": "Training Dashboard",
+    "title": "Training Dashboard with Logs",
     "panels": [
         {
             "type": "graph",
@@ -64,17 +64,22 @@
         },
         {
             "type": "logs",
-            "title": "Application Logs",
+            "title": "Training Logs",
             "datasource": "Loki",
             "targets": [
                 {
-                    "expr": "{job=\"docker\"}",
+                    "expr": "{job=\"docker\", container=\"train\"}",
                     "refId": "A"
                 }
             ],
+            "options": {
+                "showLabels": true,
+                "showTime": true,
+                "sortOrder": "Descending"
+            },
             "id": 5
         }
     ],
     "schemaVersion": 30,
-    "version": 1
+    "version": 2
 }
