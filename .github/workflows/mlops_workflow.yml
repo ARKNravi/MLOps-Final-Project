@@ -103,11 +103,11 @@ jobs:
                   import snappy as python_snappy
                   import requests
                   from remote_write_pb2 import WriteRequest, TimeSeries, Label, Sample
-                  from datetime import datetime, UTC
+                  from datetime import datetime, timezone
 
                   def send_metric():
                       # Buat timestamp dalam format yang benar (millisekon)
-                      timestamp_ms = int(datetime.now(UTC).timestamp() * 1000)
+                      timestamp_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
                       
                       # Inisialisasi WriteRequest
                       write_req = WriteRequest()

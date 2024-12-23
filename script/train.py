@@ -13,7 +13,7 @@ from sklearn.metrics import confusion_matrix
 import mlflow
 import mlflow.pytorch
 import requests
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 import snappy as python_snappy
 from remote_write_pb2 import WriteRequest, TimeSeries, Label, Sample
 
@@ -204,7 +204,7 @@ def log_to_grafana(metric_name, value, labels=None):
         return False
 
 def send_metric_to_prometheus(metric_name, value, job="mlops_training"):
-    timestamp_ms = int(datetime.now(UTC).timestamp() * 1000)
+    timestamp_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
     
     write_req = WriteRequest()
     ts = write_req.timeseries.add()
