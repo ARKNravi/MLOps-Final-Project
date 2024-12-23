@@ -176,17 +176,8 @@ jobs:
                   PROMETHEUS_REMOTE_WRITE_URL: "https://prometheus-prod-37-prod-ap-southeast-1.grafana.net/api/prom/push"
                   LOKI_URL: "https://logs-prod-020.grafana.net"
               run: |
-                  # Pull the Docker dependency image with retry mechanism
-                  n=0
-                  until [ "$n" -ge 5 ]
-                  do
-                      docker pull ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest && break
-                      n=$((n+1))
-                      echo "Retrying in 5 seconds..."
-                      sleep 5
-                  done
+                  docker pull ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest
 
-                  # Run the Docker container with dependencies
                   docker run --rm \
                       -e SUPABASE_S3_ENDPOINT="$SUPABASE_S3_ENDPOINT" \
                       -e SUPABASE_S3_REGION="$SUPABASE_S3_REGION" \
@@ -205,12 +196,8 @@ jobs:
                       -w /app \
                       --network host \
                       ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest \
-                      /bin/bash -c "
+                      bash -c "
                         echo 'Starting training...' &&
-                        # Wait for MLflow
-                        echo 'Waiting for MLflow...' &&
-                        timeout 30 bash -c 'until curl -s http://localhost:5000 > /dev/null; do sleep 1; done' &&
-                        # Run training and testing
                         python script/train.py &&
                         python script/test.py
                       "

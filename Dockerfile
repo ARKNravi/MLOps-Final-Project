@@ -1,33 +1,31 @@
 # Use an official Python runtime as a parent image
-FROM python:3.11-slim
+FROM python:3.8-slim
 
-# Install system dependencies, including curl for healthcheck
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
     git \
-    netcat-openbsd \
     curl \
+    gcc \
+    g++ \
     && rm -rf /var/lib/apt/lists/*
 
 # Set the working directory
 WORKDIR /app
 
-# Copy requirements and install dependencies
+# Copy requirements file
 COPY requirements.txt .
-RUN pip install --upgrade pip && pip install --timeout=300 --retries=10 -r requirements.txt
 
-# Copy the application code
-COPY script/ /app/script
-COPY wait-for-it.sh /app/
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Make wait-for-it.sh executable
-RUN chmod +x /app/wait-for-it.sh
+# Copy the rest of the application
+COPY . .
 
-# Expose the Prometheus metrics port
+# Make port 8000 available for Prometheus metrics
 EXPOSE 8000
 
-# Add healthcheck
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/metrics || exit 1
+# Set environment variables
+ENV PYTHONUNBUFFERED=1
 
-# Set the default command with corrected timeout flag
-ENTRYPOINT ["./wait-for-it.sh", "mlflow:5000", "-t", "120", "--", "python", "/app/script/train.py"]
+# Default command (can be overridden)
+CMD ["python", "script/train.py"]
