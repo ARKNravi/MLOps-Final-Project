@@ -47,9 +47,13 @@ jobs:
             - name: Verify Grafana Cloud Integration
               env:
                   GRAFANA_CLOUD_API_KEY: ${{ secrets.GRAFANA_CLOUD_API_KEY }}
+                  PROMETHEUS_API_KEY: ${{ secrets.PROMETHEUS_API_KEY }}
+                  LOKI_API_KEY: ${{ secrets.LOKI_API_KEY }}
                   GRAFANA_CLOUD_URL: "https://arknravi.grafana.net"
                   PROMETHEUS_REMOTE_WRITE_URL: "https://prometheus-prod-37-prod-ap-southeast-1.grafana.net/api/prom/push"
                   LOKI_URL: "https://logs-prod-020.grafana.net"
+                  PROMETHEUS_USERNAME: "1902030"
+                  LOKI_USERNAME: "1050298"
               run: |
                   # Check Grafana API health
                   echo "Checking Grafana API..."
@@ -57,18 +61,18 @@ jobs:
                       "${GRAFANA_CLOUD_URL}/api/health")
                   echo "Grafana Health: ${GRAFANA_HEALTH}"
 
-                  # Check Prometheus metrics
+                  # Check Prometheus metrics dengan basic auth
                   echo "Checking Prometheus metrics..."
                   PROM_RESPONSE=$(curl -s \
-                      -H "Authorization: Bearer ${GRAFANA_CLOUD_API_KEY}" \
-                      "${PROMETHEUS_REMOTE_WRITE_URL%/push}/api/v1/query?query=up")
+                      -u "${PROMETHEUS_USERNAME}:${PROMETHEUS_API_KEY}" \
+                      "https://prometheus-prod-37-prod-ap-southeast-1.grafana.net/api/prom/api/v1/query?query=up")
                   echo "Prometheus Response: ${PROM_RESPONSE}"
 
-                  # Check Loki logs
+                  # Check Loki logs dengan basic auth
                   echo "Checking Loki logs..."
                   LOKI_RESPONSE=$(curl -s \
-                      -H "Authorization: Bearer ${GRAFANA_CLOUD_API_KEY}" \
-                      "${LOKI_URL}/loki/api/v1/labels")
+                      -u "${LOKI_USERNAME}:${LOKI_API_KEY}" \
+                      "https://logs-prod-020.grafana.net/loki/api/v1/labels")
                   echo "Loki Response: ${LOKI_RESPONSE}"
 
                   # Print dashboard URL
