@@ -67,6 +67,7 @@ jobs:
                   # Buat script Python untuk mengirim metrik
                   cat > send_metric.py << EOF
                   import time
+                  import requests
                   from prometheus_client import CollectorRegistry, Gauge, push_to_gateway
                   import os
 
@@ -78,22 +79,29 @@ jobs:
                   username = os.environ['PROMETHEUS_USERNAME']
                   password = os.environ['PROMETHEUS_API_KEY']
 
-                  push_to_gateway(
-                      url,
-                      job='github_actions_test',
-                      registry=registry,
-                      handler=lambda url, method, timeout, headers, data: requests.post(
+                  try:
+                      # Kirim metrik langsung menggunakan requests
+                      response = requests.post(
                           url,
-                          data=data,
+                          data=registry,
                           auth=(username, password),
                           headers={
                               'Content-Type': 'application/x-protobuf',
                               'X-Prometheus-Remote-Write-Version': '0.1.0',
                               'X-Scope-OrgID': username
-                          },
-                          timeout=timeout
+                          }
                       )
-                  )
+                      print(f"Status code: {response.status_code}")
+                      print(f"Response: {response.text}")
+                      
+                      if response.status_code == 200:
+                          print("✅ Metric sent successfully")
+                      else:
+                          print("❌ Failed to send metric")
+                          print(f"Error: {response.text}")
+                  except Exception as e:
+                      print(f"Error sending metric: {e}")
+                      exit(1)
                   EOF
 
                   # Jalankan script

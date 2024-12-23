@@ -170,32 +170,25 @@ def log_to_grafana(metric_name, value, labels=None):
     labels['environment'] = 'github_actions'
     labels['job'] = 'mlops_training'
     
-    # Gunakan prometheus_client untuk mengirim metrik
-    registry = CollectorRegistry()
-    g = Gauge(metric_name, f'Metric {metric_name}', registry=registry)
-    g.set(float(value))
-    
     try:
-        # Kirim ke Prometheus menggunakan push_to_gateway
-        push_to_gateway(
+        # Kirim ke Prometheus
+        registry = CollectorRegistry()
+        g = Gauge(metric_name, f'Metric {metric_name}', labelnames=labels.keys(), registry=registry)
+        g.labels(**labels).set(float(value))
+        
+        response = requests.post(
             os.environ.get('PROMETHEUS_REMOTE_WRITE_URL'),
-            job='mlops_training',
-            registry=registry,
-            handler=lambda url, method, timeout, headers, data: requests.post(
-                url,
-                data=data,
-                auth=(os.environ.get('PROMETHEUS_USERNAME'), os.environ.get('PROMETHEUS_API_KEY')),
-                headers={
-                    'Content-Type': 'application/x-protobuf',
-                    'X-Prometheus-Remote-Write-Version': '0.1.0',
-                    'X-Scope-OrgID': os.environ.get('PROMETHEUS_USERNAME')
-                },
-                timeout=timeout
-            )
+            data=registry,
+            auth=(os.environ.get('PROMETHEUS_USERNAME'), os.environ.get('PROMETHEUS_API_KEY')),
+            headers={
+                'Content-Type': 'application/x-protobuf',
+                'X-Prometheus-Remote-Write-Version': '0.1.0',
+                'X-Scope-OrgID': os.environ.get('PROMETHEUS_USERNAME')
+            }
         )
         
-        # Kirim ke Loki (ini sudah bekerja dengan baik)
-        timestamp = int(time.time() * 1e9)  # Convert to nanoseconds
+        # Kirim ke Loki
+        timestamp = int(time.time() * 1e9)
         loki_payload = {
             "streams": [{
                 "stream": {
@@ -216,7 +209,10 @@ def log_to_grafana(metric_name, value, labels=None):
             headers={"Content-Type": "application/json"}
         )
         
-        return True
+        print(f"Prometheus response: {response.status_code}")
+        print(f"Loki response: {loki_response.status_code}")
+        
+        return response.status_code == 200 and loki_response.status_code == 204
     except Exception as e:
         print(f"Error logging metric: {e}")
         return False
