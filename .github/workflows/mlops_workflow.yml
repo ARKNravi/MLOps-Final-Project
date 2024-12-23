@@ -1,179 +1,180 @@
 name: MLOps CI/CD Pipeline
 
 on:
-    push:
-        branches:
-            - main
-    pull_request:
-        branches:
-            - main
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
 
 jobs:
-    monitoring_setup:
-        runs-on: ubuntu-latest
-        steps:
-            - name: Checkout repository
-              uses: actions/checkout@v2
+  monitoring_setup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-            - name: Configure Grafana Cloud
-              env:
-                  GRAFANA_CLOUD_API_KEY: ${{ secrets.GRAFANA_CLOUD_API_KEY }}
-                  PROMETHEUS_REMOTE_WRITE_URL: ${{ secrets.PROMETHEUS_REMOTE_WRITE_URL }}
-              run: |
-                  # Setup Prometheus remote write configuration
-                  cat > prometheus.yml << EOF
-                  global:
-                    scrape_interval: 15s
-                    evaluation_interval: 15s
+      - name: Configure Grafana Cloud
+        env:
+          GRAFANA_CLOUD_API_KEY: ${{ secrets.GRAFANA_CLOUD_API_KEY }}
+          PROMETHEUS_REMOTE_WRITE_URL: ${{ secrets.PROMETHEUS_REMOTE_WRITE_URL }}
+          PROMETHEUS_API_KEY: ${{ secrets.PROMETHEUS_API_KEY }}
+        run: |
+          # Setup Prometheus remote write configuration
+          cat > prometheus.yml << EOF
+          global:
+            scrape_interval: 15s
+            evaluation_interval: 15s
 
-                  remote_write:
-                    - url: ${PROMETHEUS_REMOTE_WRITE_URL}
-                      basic_auth:
-                        username: api_key
-                        password: ${GRAFANA_CLOUD_API_KEY}
+          remote_write:
+            - url: ${PROMETHEUS_REMOTE_WRITE_URL}
+              basic_auth:
+                username: api_key
+                password: ${PROMETHEUS_API_KEY}
 
-                  scrape_configs:
-                    - job_name: 'prometheus'
-                      static_configs:
-                        - targets: ['localhost:9090']
+          scrape_configs:
+            - job_name: 'prometheus'
+              static_configs:
+                - targets: ['localhost:9090']
 
-                    - job_name: 'train'
-                      static_configs:
-                        - targets: ['localhost:8000']
+            - job_name: 'train'
+              static_configs:
+                - targets: ['localhost:8000']
 
-                    - job_name: 'loki'
-                      static_configs:
-                        - targets: ['localhost:3100']
-                  EOF
+            - job_name: 'loki'
+              static_configs:
+                - targets: ['localhost:3100']
+          EOF
 
-                  # Verify configuration
-                  echo "Testing connection to Grafana Cloud..."
-                  curl -I -H "Authorization: Bearer ${GRAFANA_CLOUD_API_KEY}" https://arknravi.grafana.net/api/health
+          # Verify configuration
+          echo "Testing connection to Grafana Cloud..."
+          curl -I -H "Authorization: Bearer ${GRAFANA_CLOUD_API_KEY}" https://arknravi.grafana.net/api/health
 
-            - name: Upload Prometheus Configuration
-              uses: actions/upload-artifact@v3
-              with:
-                  name: prometheus-config
-                  path: prometheus.yml
+      - name: Upload Prometheus Configuration
+        uses: actions/upload-artifact@v3
+        with:
+          name: prometheus-config
+          path: prometheus.yml
 
-    build_and_cache_dependencies:
-        runs-on: ubuntu-latest
-        steps:
-            - name: Checkout repository
-              uses: actions/checkout@v2
+  build_and_cache_dependencies:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-            - name: Log in to Docker Hub
-              uses: docker/login-action@v2
-              with:
-                  username: ${{ secrets.DOCKER_USERNAME }}
-                  password: ${{ secrets.DOCKER_PASSWORD }}
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
 
-            - name: Build and Push Dependency Image
-              run: |
-                  docker build -t ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest .
-                  docker push ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest
+      - name: Build and Push Dependency Image
+        run: |
+          docker build -t ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest .
+          docker push ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest
 
-    train_and_evaluate:
-        runs-on: ubuntu-latest
-        needs: [build_and_cache_dependencies, monitoring_setup]
-        services:
-            grafana:
-                image: grafana/grafana:latest
-                ports:
-                    - 3000:3000
-            mlflow:
-                image: ghcr.io/mlflow/mlflow:v2.18.0rc0
-                ports:
-                    - 5000:5000
+  train_and_evaluate:
+    runs-on: ubuntu-latest
+    needs: [build_and_cache_dependencies, monitoring_setup]
+    services:
+      grafana:
+        image: grafana/grafana:latest
+        ports:
+          - 3000:3000
+      mlflow:
+        image: ghcr.io/mlflow/mlflow:v2.18.0rc0
+        ports:
+          - 5000:5000
 
-        steps:
-            - name: Checkout repository
-              uses: actions/checkout@v2
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-            - name: Download Prometheus Configuration
-              uses: actions/download-artifact@v2
-              with:
-                  name: prometheus-config
-                  path: ./prometheus_config
+      - name: Download Prometheus Configuration
+        uses: actions/download-artifact@v3
+        with:
+          name: prometheus-config
+          path: ./prometheus_config
 
-            - name: Start Prometheus with Remote Write
-              run: |
-                  mkdir -p ./prometheus_config
-                  # Assuming prometheus.yml is downloaded to ./prometheus_config/prometheus.yml
-                  docker stop prometheus || true
-                  docker rm prometheus || true
-                  docker run -d --name prometheus -p 9090:9090 \
-                    -v $(pwd)/prometheus_config/prometheus.yml:/etc/prometheus/prometheus.yml prom/prometheus:latest
+      - name: Start Prometheus with Remote Write
+        run: |
+          mkdir -p ./prometheus_config
+          # Assuming prometheus.yml is downloaded to ./prometheus_config/prometheus.yml
+          docker stop prometheus || true
+          docker rm prometheus || true
+          docker run -d --name prometheus -p 9090:9090 \
+            -v $(pwd)/prometheus_config/prometheus.yml:/etc/prometheus/prometheus.yml prom/prometheus:latest
 
-            - name: Verify Prometheus Remote Write
-              run: |
-                  echo "Verifying Prometheus remote_write configuration..."
-                  curl -s http://localhost:9090/api/v1/status/config | grep remote_write
+      - name: Verify Prometheus Remote Write
+        run: |
+          echo "Verifying Prometheus remote_write configuration..."
+          curl -s http://localhost:9090/api/v1/status/config | grep remote_write
 
-            - name: Log environment variables for debugging
-              run: |
-                  echo "DAGSHUB_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}"
-                  echo "DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}"
-                  echo "SUPABASE_S3_ENDPOINT: ${{ secrets.SUPABASE_S3_ENDPOINT }}"
-                  echo "SUPABASE_S3_REGION: ${{ secrets.SUPABASE_S3_REGION }}"
-                  echo "SUPABASE_S3_ACCESS_KEY_ID: ${{ secrets.SUPABASE_S3_ACCESS_KEY_ID }}"
-                  echo "SUPABASE_S3_SECRET_ACCESS_KEY: ${{ secrets.SUPABASE_S3_SECRET_ACCESS_KEY }}"
+      - name: Log environment variables for debugging
+        run: |
+          echo "DAGSHUB_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}"
+          echo "DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}"
+          echo "SUPABASE_S3_ENDPOINT: ${{ secrets.SUPABASE_S3_ENDPOINT }}"
+          echo "SUPABASE_S3_REGION: ${{ secrets.SUPABASE_S3_REGION }}"
+          echo "SUPABASE_S3_ACCESS_KEY_ID: ${{ secrets.SUPABASE_S3_ACCESS_KEY_ID }}"
+          echo "SUPABASE_S3_SECRET_ACCESS_KEY: ${{ secrets.SUPABASE_S3_SECRET_ACCESS_KEY }}"
 
-            - name: Pull and Run Dependency Image
-              env:
-                  SUPABASE_S3_ENDPOINT: ${{ secrets.SUPABASE_S3_ENDPOINT }}
-                  SUPABASE_S3_REGION: ${{ secrets.SUPABASE_S3_REGION }}
-                  SUPABASE_S3_ACCESS_KEY_ID: ${{ secrets.SUPABASE_S3_ACCESS_KEY_ID }}
-                  SUPABASE_S3_SECRET_ACCESS_KEY: ${{ secrets.SUPABASE_S3_SECRET_ACCESS_KEY }}
-                  DAGSHUB_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
-                  DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
-                  PROMETHEUS_API_KEY: ${{ secrets.PROMETHEUS_API_KEY }}
-                  LOKI_API_KEY: ${{ secrets.LOKI_API_KEY }}
-                  PROMETHEUS_REMOTE_WRITE_URL: ${{ secrets.PROMETHEUS_REMOTE_WRITE_URL }}
-                  LOKI_URL: ${{ secrets.LOKI_URL }}
-                  MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
-              run: |
-                  docker pull ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest
+      - name: Pull and Run Dependency Image
+        env:
+          SUPABASE_S3_ENDPOINT: ${{ secrets.SUPABASE_S3_ENDPOINT }}
+          SUPABASE_S3_REGION: ${{ secrets.SUPABASE_S3_REGION }}
+          SUPABASE_S3_ACCESS_KEY_ID: ${{ secrets.SUPABASE_S3_ACCESS_KEY_ID }}
+          SUPABASE_S3_SECRET_ACCESS_KEY: ${{ secrets.SUPABASE_S3_SECRET_ACCESS_KEY }}
+          DAGSHUB_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
+          DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
+          PROMETHEUS_API_KEY: ${{ secrets.PROMETHEUS_API_KEY }}
+          LOKI_API_KEY: ${{ secrets.LOKI_API_KEY }}
+          PROMETHEUS_REMOTE_WRITE_URL: ${{ secrets.PROMETHEUS_REMOTE_WRITE_URL }}
+          LOKI_URL: ${{ secrets.LOKI_URL }}
+          MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+        run: |
+          docker pull ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest
 
-                  docker run --rm \
-                    -e SUPABASE_S3_ENDPOINT="$SUPABASE_S3_ENDPOINT" \
-                    -e SUPABASE_S3_REGION="$SUPABASE_S3_REGION" \
-                    -e SUPABASE_S3_ACCESS_KEY_ID="$SUPABASE_S3_ACCESS_KEY_ID" \
-                    -e SUPABASE_S3_SECRET_ACCESS_KEY="$SUPABASE_S3_SECRET_ACCESS_KEY" \
-                    -e DAGSHUB_USERNAME="$DAGSHUB_USERNAME" \
-                    -e DAGSHUB_TOKEN="$DAGSHUB_TOKEN" \
-                    -e PROMETHEUS_API_KEY="$PROMETHEUS_API_KEY" \
-                    -e LOKI_API_KEY="$LOKI_API_KEY" \
-                    -e PROMETHEUS_REMOTE_WRITE_URL="$PROMETHEUS_REMOTE_WRITE_URL" \
-                    -e LOKI_URL="$LOKI_URL" \
-                    -e MLFLOW_TRACKING_URI="$MLFLOW_TRACKING_URI" \
-                    -v ${{ github.workspace }}:/app \
-                    -w /app \
-                    --network host \
-                    ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest \
-                    bash -c "
-                      echo 'Starting training...' &&
-                      python script/train.py &&
-                      python script/test.py
-                    "
+          docker run --rm \
+            -e SUPABASE_S3_ENDPOINT="$SUPABASE_S3_ENDPOINT" \
+            -e SUPABASE_S3_REGION="$SUPABASE_S3_REGION" \
+            -e SUPABASE_S3_ACCESS_KEY_ID="$SUPABASE_S3_ACCESS_KEY_ID" \
+            -e SUPABASE_S3_SECRET_ACCESS_KEY="$SUPABASE_S3_SECRET_ACCESS_KEY" \
+            -e DAGSHUB_USERNAME="$DAGSHUB_USERNAME" \
+            -e DAGSHUB_TOKEN="$DAGSHUB_TOKEN" \
+            -e PROMETHEUS_API_KEY="$PROMETHEUS_API_KEY" \
+            -e LOKI_API_KEY="$LOKI_API_KEY" \
+            -e PROMETHEUS_REMOTE_WRITE_URL="$PROMETHEUS_REMOTE_WRITE_URL" \
+            -e LOKI_URL="$LOKI_URL" \
+            -e MLFLOW_TRACKING_URI="$MLFLOW_TRACKING_URI" \
+            -v ${{ github.workspace }}:/app \
+            -w /app \
+            --network host \
+            ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest \
+            bash -c "
+              echo 'Starting training...' &&
+              python script/train.py &&
+              python script/test.py
+            "
 
-    build_and_push_docker:
-        runs-on: ubuntu-latest
-        needs: train_and_evaluate
-        steps:
-            - name: Checkout repository
-              uses: actions/checkout@v2
+  build_and_push_docker:
+    runs-on: ubuntu-latest
+    needs: train_and_evaluate
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-            - name: Log in to Docker Hub
-              uses: docker/login-action@v2
-              with:
-                  username: ${{ secrets.DOCKER_USERNAME }}
-                  password: ${{ secrets.DOCKER_PASSWORD }}
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
 
-            - name: Build Docker Image with Model
-              run: |
-                  docker build -t ${{ secrets.DOCKER_USERNAME }}/mlops_project:latest .
+      - name: Build Docker Image with Model
+        run: |
+          docker build -t ${{ secrets.DOCKER_USERNAME }}/mlops_project:latest .
 
-            - name: Push Docker Image
-              run: |
-                  docker push ${{ secrets.DOCKER_USERNAME }}/mlops_project:latest
+      - name: Push Docker Image
+        run: |
+          docker push ${{ secrets.DOCKER_USERNAME }}/mlops_project:latest
