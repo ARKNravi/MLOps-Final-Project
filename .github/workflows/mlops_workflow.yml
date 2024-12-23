@@ -22,7 +22,6 @@ jobs:
                   PROMETHEUS_REMOTE_WRITE_URL: ${{ secrets.PROMETHEUS_REMOTE_WRITE_URL }}
                   LOKI_URL: ${{ secrets.LOKI_URL }}
               run: |
-                  # Setup Prometheus remote write configuration dengan label tambahan
                   cat > prometheus.yml << EOF
                   global:
                     scrape_interval: 15s
@@ -69,48 +68,68 @@ jobs:
 
                   # Buat script Python untuk mengirim metrik
                   cat > send_metric.py << EOF
-                  import time
-                  import requests
-                  import json
                   import os
+                  import json
+                  import snappy
+                  import requests
+                  import sys
+                  sys.path.append('script')  # Tambahkan path untuk menemukan remote_write_pb2
+                  from remote_write_pb2 import WriteRequest, TimeSeries, Label, Sample
+                  from datetime import datetime
 
                   def send_metric():
-                      # Buat timestamp dalam format yang benar
-                      timestamp_ms = int(time.time() * 1000)
+                      # Buat timestamp dalam format yang benar (nanodetik)
+                      timestamp_ns = int(datetime.utcnow().timestamp() * 1e9)
                       
-                      # Format metrik sesuai dengan Grafana Cloud Prometheus API
-                      metric_data = {
-                          "series": [{
-                              "labels": [
-                                  {"name": "__name__", "value": "test_metric"},
-                                  {"name": "job", "value": "github_actions_test"},
-                                  {"name": "instance", "value": "test"},
-                                  {"name": "environment", "value": "github_actions"}
-                              ],
-                              "samples": [
-                                  [timestamp_ms, "1.0"]
-                              ]
-                          }]
-                      }
-
+                      # Inisialisasi WriteRequest
+                      write_req = WriteRequest()
+                      
+                      # Tambahkan TimeSeries
+                      ts = write_req.timeseries.add()
+                      
+                      # Tambahkan Labels
+                      labels = [
+                          ("__name__", "test_metric"),
+                          ("job", "github_actions_test"),
+                          ("instance", "test"),
+                          ("environment", "github_actions")
+                      ]
+                      
+                      for name, value in labels:
+                          label = ts.labels.add()
+                          label.name = name
+                          label.value = value
+                      
+                      # Tambahkan Sample
+                      sample = ts.samples.add()
+                      sample.value = 1.0
+                      sample.timestamp = timestamp_ns
+                      
+                      # Serialize ke Protobuf
+                      data = write_req.SerializeToString()
+                      
+                      # Kompresi dengan Snappy
+                      compressed_data = snappy.compress(data)
+                      
                       url = os.environ['PROMETHEUS_REMOTE_WRITE_URL']
                       username = os.environ['PROMETHEUS_USERNAME']
                       password = os.environ['PROMETHEUS_API_KEY']
-
+                      
+                      headers = {
+                          "Content-Encoding": "snappy",
+                          "Content-Type": "application/x-protobuf",
+                          "X-Prometheus-Remote-Write-Version": "0.1.0"
+                      }
+                      
                       try:
-                          headers = {
-                              "Authorization": f"Bearer {os.environ.get('PROMETHEUS_API_KEY')}",
-                              "Content-Type": "application/json"
-                          }
                           response = requests.post(
                               url,
-                              json=metric_data,
+                              data=compressed_data,
                               auth=(username, password),
                               headers=headers
                           )
                           
                           print(f"Status code: {response.status_code}")
-                          print(f"Headers: {response.headers}")
                           if response.text:
                               print(f"Response: {response.text}")
                           
@@ -122,11 +141,10 @@ jobs:
                                   print(f"Error: {response.text}")
                               print(f"Request URL: {url}")
                               print(f"Request headers: {headers}")
-                              print(f"Request body: {json.dumps(metric_data, indent=2)}")
                       except Exception as e:
                           print(f"Error sending metric: {e}")
                           exit(1)
-
+                      
                   if __name__ == "__main__":
                       send_metric()
                   EOF
