@@ -44,6 +44,34 @@ jobs:
                   echo "Testing connection to Grafana Cloud..."
                   curl -I -H "Authorization: Bearer ${GRAFANA_CLOUD_API_KEY}" ${GRAFANA_CLOUD_API_URL}/api/health
 
+            - name: Verify Grafana Cloud Integration
+              env:
+                  GRAFANA_CLOUD_API_KEY: ${{ secrets.GRAFANA_CLOUD_API_KEY }}
+                  GRAFANA_CLOUD_API_URL: ${{ secrets.GRAFANA_CLOUD_URL }}
+                  PROMETHEUS_REMOTE_WRITE_URL: ${{ secrets.PROMETHEUS_REMOTE_WRITE_URL }}
+                  LOKI_URL: ${{ secrets.LOKI_URL }}
+              run: |
+                  # Check Grafana API health
+                  echo "Checking Grafana API..."
+                  GRAFANA_HEALTH=$(curl -s -H "Authorization: Bearer ${GRAFANA_CLOUD_API_KEY}" \
+                      "${GRAFANA_CLOUD_API_URL}/api/health")
+                  echo "Grafana Health: ${GRAFANA_HEALTH}"
+
+                  # Check Prometheus metrics
+                  echo "Checking Prometheus metrics..."
+                  PROM_RESPONSE=$(curl -s -H "Authorization: Bearer ${GRAFANA_CLOUD_API_KEY}" \
+                      "${GRAFANA_CLOUD_API_URL}/api/v1/query?query=up")
+                  echo "Prometheus Response: ${PROM_RESPONSE}"
+
+                  # Check Loki logs
+                  echo "Checking Loki logs..."
+                  LOKI_RESPONSE=$(curl -s -H "Authorization: Bearer ${GRAFANA_CLOUD_API_KEY}" \
+                      "${LOKI_URL}/loki/api/v1/labels")
+                  echo "Loki Response: ${LOKI_RESPONSE}"
+
+                  # Print dashboard URL
+                  echo "Grafana Dashboard URL: ${GRAFANA_CLOUD_API_URL}/dashboards"
+
     # Step 1: Build Base Image with Dependencies
     build_and_cache_dependencies:
         runs-on: ubuntu-latest

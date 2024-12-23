@@ -12,6 +12,8 @@ import seaborn as sns
 from sklearn.metrics import confusion_matrix
 import mlflow
 import mlflow.pytorch
+import requests
+from datetime import datetime
 
 # MLflow Tracking URI
 MLFLOW_TRACKING_URI = "https://dagshub.com/salsazufar/project-akhir-mlops.mlflow"
@@ -102,6 +104,40 @@ def log_confusion_matrix(model, dataloader, class_names):
     # Log the confusion matrix image as an artifact in MLflow
     mlflow.log_artifact(confusion_matrix_path)
 
+# Add Grafana Cloud logging
+def log_to_grafana(metric_name, value, labels=None):
+    if not labels:
+        labels = {}
+    
+    timestamp = int(datetime.now().timestamp() * 1000)
+    
+    # Prometheus metric format
+    metric = {
+        "metrics": [{
+            "name": metric_name,
+            "value": value,
+            "timestamp": timestamp,
+            "labels": labels
+        }]
+    }
+    
+    headers = {
+        "Authorization": f"Bearer {os.getenv('GRAFANA_CLOUD_API_KEY')}",
+        "Content-Type": "application/json"
+    }
+    
+    try:
+        response = requests.post(
+            os.getenv('PROMETHEUS_REMOTE_WRITE_URL'),
+            json=metric,
+            headers=headers
+        )
+        print(f"Metric logged: {metric_name}={value}")
+        return response.status_code == 200
+    except Exception as e:
+        print(f"Error logging metric: {e}")
+        return False
+
 # Training function
 def train_model(model, criterion, optimizer, scheduler, num_epochs):
     best_model_wts = copy.deepcopy(model.state_dict())
@@ -147,9 +183,15 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs):
 
                 print(f'{phase} Loss: {epoch_loss:.4f} Acc: {epoch_acc:.4f}')
 
-                # Log metrics for each epoch
-                mlflow.log_metric(f"{phase}_loss", epoch_loss, step=epoch)
-                mlflow.log_metric(f"{phase}_accuracy", epoch_acc, step=epoch)
+                # Log to Grafana Cloud
+                log_to_grafana(f"{phase}_loss", epoch_loss, {
+                    "epoch": str(epoch),
+                    "phase": phase
+                })
+                log_to_grafana(f"{phase}_accuracy", epoch_acc, {
+                    "epoch": str(epoch),
+                    "phase": phase
+                })
 
                 # Save best model weights
                 if phase == 'val' and epoch_acc > best_acc:

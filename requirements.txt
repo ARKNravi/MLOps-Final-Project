@@ -18,3 +18,4 @@ six
 python-dateutil
 prometheus_client
 seaborn
+requests==2.31.0  # Untuk HTTP requests ke Grafana
