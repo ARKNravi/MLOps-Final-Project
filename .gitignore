@@ -564,3 +564,6 @@ temp/
 # If you have environment-specific configurations, you might want to ignore them.
 # For example:
 # config/local.yml
+
+# artifact png file
+*.png
