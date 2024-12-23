@@ -79,8 +79,8 @@ datasets = {
     'val': datasets.ImageFolder(val_dir, data_transforms['val'])
 }
 dataloaders = {
-    'train': data.DataLoader(datasets['train'], batch_size=batch_size, shuffle=True, num_workers=4),
-    'val': data.DataLoader(datasets['val'], batch_size=batch_size, shuffle=False, num_workers=4)
+    'train': data.DataLoader(datasets['train'], batch_size=batch_size, shuffle=True, num_workers=2),
+    'val': data.DataLoader(datasets['val'], batch_size=batch_size, shuffle=False, num_workers=2)
 }
 dataset_sizes = {x: len(datasets[x]) for x in ['train', 'val']}
 class_names = datasets['train'].classes
@@ -209,7 +209,13 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs):
     best_model_wts = copy.deepcopy(model.state_dict())
     best_acc = 0.0
 
-    with mlflow.start_run():
+    print("Starting training...")
+    print(f"Training on device: {device}")
+    print(f"Dataset sizes - Train: {dataset_sizes['train']}, Val: {dataset_sizes['val']}")
+
+    with mlflow.start_run() as run:
+        print(f"MLflow run ID: {run.info.run_id}")
+        
         # Log hyperparameters
         mlflow.log_param("batch_size", batch_size)
         mlflow.log_param("learning_rate", learning_rate)
@@ -219,6 +225,8 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs):
         mlflow.log_param("num_epochs", num_epochs)
 
         for epoch in range(num_epochs):
+            print(f'\nEpoch {epoch}/{num_epochs-1}')
+            print('-' * 10)
             epoch_start_time = time.time()
             
             for phase in ['train', 'val']:
@@ -231,7 +239,14 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs):
                 running_corrects = 0
                 batch_times = []
 
+                # Add progress tracking
+                total_batches = len(dataloaders[phase])
+                print(f"\n{phase} phase:")
+
                 for batch_idx, (inputs, labels) in enumerate(dataloaders[phase]):
+                    if batch_idx % 10 == 0:  # Print every 10 batches
+                        print(f'Batch {batch_idx}/{total_batches}', end='\r')
+                        
                     batch_start_time = time.time()
                     
                     inputs, labels = inputs.to(device), labels.to(device)
@@ -248,20 +263,21 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs):
                     running_loss += loss.item() * inputs.size(0)
                     running_corrects += torch.sum(preds == labels.data)
 
-                    # Log batch time
+                    # Log batch metrics
                     batch_time = time.time() - batch_start_time
                     batch_times.append(batch_time)
                     BATCH_TIME.set(batch_time)
                     
-                    # Log GPU memory if available
-                    if torch.cuda.is_available():
-                        memory_allocated = torch.cuda.memory_allocated() / 1024 / 1024  # Convert to MB
-                        GPU_MEMORY.set(memory_allocated)
+                    if batch_idx % 10 == 0:  # Log every 10 batches
+                        current_loss = loss.item()
+                        print(f"\nBatch {batch_idx}/{total_batches} - Loss: {current_loss:.4f}")
                 
                 # Calculate and log metrics
                 epoch_loss = running_loss / dataset_sizes[phase]
                 epoch_acc = running_corrects.double() / dataset_sizes[phase]
                 
+                print(f'{phase} Loss: {epoch_loss:.4f} Acc: {epoch_acc:.4f}')
+
                 # Log metrics to MLflow
                 mlflow.log_metric(f"{phase}_loss", epoch_loss, step=epoch)
                 mlflow.log_metric(f"{phase}_accuracy", epoch_acc.item(), step=epoch)
@@ -283,8 +299,6 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs):
                     log_to_grafana("learning_rate", current_lr, {"epoch": str(epoch)})
                     mlflow.log_metric("learning_rate", current_lr, step=epoch)
             
-                print(f'Epoch {epoch}/{num_epochs-1} {phase} Loss: {epoch_loss:.4f} Acc: {epoch_acc:.4f}')
-
                 # Save best model weights
                 if phase == 'val' and epoch_acc > best_acc:
                     best_acc = epoch_acc
