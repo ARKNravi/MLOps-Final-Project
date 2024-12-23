@@ -177,7 +177,7 @@ def log_to_grafana(metric_name, value, labels=None):
         g = Gauge(metric_name, f'Metric {metric_name}', labelnames=labels.keys(), registry=registry)
         g.labels(**labels).set(float(value))
         
-        # Generate dan kompres data metrik
+        # Generate dan kompres data metrik menggunakan python-snappy
         metric_data = generate_latest(registry)
         compressed_data = snappy.compress(metric_data)
         

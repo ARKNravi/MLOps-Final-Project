@@ -61,8 +61,9 @@ jobs:
                   PROMETHEUS_REMOTE_WRITE_URL: ${{ secrets.PROMETHEUS_REMOTE_WRITE_URL }}
               run: |
                   # Install dependencies untuk remote write
-                  sudo apt-get update && sudo apt-get install -y python3-pip
-                  pip3 install prometheus-client requests snappy
+                  sudo apt-get update && sudo apt-get install -y python3-pip python3-dev
+                  sudo apt-get install -y libsnappy-dev  # Diperlukan untuk python-snappy
+                  pip3 install prometheus-client requests python-snappy
 
                   # Buat script Python untuk mengirim metrik
                   cat > send_metric.py << EOF
@@ -84,7 +85,7 @@ jobs:
                       # Generate metrik dalam format yang benar
                       metric_data = generate_latest(registry)
                       
-                      # Kompres data menggunakan snappy
+                      # Kompres data menggunakan python-snappy
                       compressed_data = snappy.compress(metric_data)
                       
                       # Kirim metrik
