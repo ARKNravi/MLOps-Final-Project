@@ -139,19 +139,16 @@ def log_to_grafana(metric_name, value, labels=None):
     if not labels:
         labels = {}
     
-    # Update Prometheus metrics
-    if metric_name == 'train_loss':
-        TRAIN_LOSS.set(value)
-    elif metric_name == 'train_accuracy':
-        TRAIN_ACC.set(value)
-    elif metric_name == 'val_loss':
-        VAL_LOSS.set(value)
-    elif metric_name == 'val_accuracy':
-        VAL_ACC.set(value)
+    # Add common labels
+    labels.update({
+        "job": "mlops-training",
+        "instance": "github-action",
+        "environment": "ci"
+    })
     
-    # Log to Grafana Cloud
+    # Send to Prometheus
     timestamp = int(datetime.now().timestamp() * 1000)
-    metric = {
+    prom_metric = {
         "metrics": [{
             "name": metric_name,
             "value": value,
@@ -160,35 +157,33 @@ def log_to_grafana(metric_name, value, labels=None):
         }]
     }
     
-    headers = {
-        "Authorization": f"Bearer {os.environ.get('PROMETHEUS_API_KEY')}",
-        "Content-Type": "application/json"
-    }
-    
     try:
-        response = requests.post(
+        # Send to Prometheus
+        prom_response = requests.post(
             os.environ.get('PROMETHEUS_REMOTE_WRITE_URL'),
-            json=metric,
-            headers=headers,
+            json=prom_metric,
+            headers={"Content-Type": "application/json"},
             auth=(os.environ.get('PROMETHEUS_USERNAME'), os.environ.get('PROMETHEUS_API_KEY'))
         )
         
-        # Send to Loki
-        log_message = {
-            "level": "info",
-            "message": f"Metric logged: {metric_name}={value}",
-            "metric_name": metric_name,
-            "value": value,
-            "timestamp": timestamp
-        }
-        
+        # Send to Loki with structured logging
         loki_payload = {
             "streams": [{
                 "stream": {
                     "job": "mlops-training",
+                    "instance": "github-action",
+                    "environment": "ci",
                     "level": "info"
                 },
-                "values": [[str(timestamp), json.dumps(log_message)]]
+                "values": [[
+                    str(timestamp * 1000000), # Loki expects nanoseconds
+                    json.dumps({
+                        "metric": metric_name,
+                        "value": value,
+                        "labels": labels,
+                        "message": f"Metric logged: {metric_name}={value}"
+                    })
+                ]]
             }]
         }
         
@@ -197,11 +192,11 @@ def log_to_grafana(metric_name, value, labels=None):
             json=loki_payload,
             auth=(os.environ.get('LOKI_USERNAME'), os.environ.get('LOKI_API_KEY'))
         )
-        print(f"Log sent to Loki: {log_message}")
         
-        return response.status_code == 200
+        print(f"Metrics sent - Prometheus: {prom_response.status_code}, Loki: {loki_response.status_code}")
+        return True
     except Exception as e:
-        print(f"Error logging metric: {e}")
+        print(f"Error sending metrics: {e}")
         return False
 
 # Training function
@@ -244,9 +239,6 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs):
                 print(f"\n{phase} phase:")
 
                 for batch_idx, (inputs, labels) in enumerate(dataloaders[phase]):
-                    if batch_idx % 10 == 0:  # Print every 10 batches
-                        print(f'Batch {batch_idx}/{total_batches}', end='\r')
-                        
                     batch_start_time = time.time()
                     
                     inputs, labels = inputs.to(device), labels.to(device)
@@ -260,16 +252,22 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs):
                             loss.backward()
                             optimizer.step()
 
-                    running_loss += loss.item() * inputs.size(0)
-                    running_corrects += torch.sum(preds == labels.data)
-
-                    # Log batch metrics
-                    batch_time = time.time() - batch_start_time
-                    batch_times.append(batch_time)
-                    BATCH_TIME.set(batch_time)
+                    # Log batch metrics immediately
+                    current_loss = loss.item()
+                    log_to_grafana('batch_loss', current_loss, {
+                        'batch': str(batch_idx),
+                        'epoch': str(epoch),
+                        'phase': phase
+                    })
                     
-                    if batch_idx % 10 == 0:  # Log every 10 batches
-                        current_loss = loss.item()
+                    # Log batch time
+                    batch_time = time.time() - batch_start_time
+                    log_to_grafana('batch_time', batch_time, {
+                        'batch': str(batch_idx),
+                        'epoch': str(epoch)
+                    })
+                    
+                    if batch_idx % 10 == 0:
                         print(f"\nBatch {batch_idx}/{total_batches} - Loss: {current_loss:.4f}")
                 
                 # Calculate and log metrics
