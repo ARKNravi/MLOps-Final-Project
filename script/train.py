@@ -19,16 +19,16 @@ import time
 import json
 
 # MLflow configuration
-MLFLOW_TRACKING_URI = "https://dagshub.com/salsazufar/project-akhir-mlops.mlflow"
+MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "https://dagshub.com/salsazufar/project-akhir-mlops.mlflow")
 mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
 
 # Set MLflow credentials through environment variables
-os.environ['MLFLOW_TRACKING_USERNAME'] = os.environ.get('DAGSHUB_USERNAME', '')
-os.environ['MLFLOW_TRACKING_PASSWORD'] = os.environ.get('DAGSHUB_TOKEN', '')
+os.environ['MLFLOW_TRACKING_USERNAME'] = os.getenv('DAGSHUB_USERNAME', '')
+os.environ['MLFLOW_TRACKING_PASSWORD'] = os.getenv('DAGSHUB_TOKEN', '')
 
 # Print for debugging
 print(f"MLflow Tracking URI: {MLFLOW_TRACKING_URI}")
-print(f"DagsHub Username: {os.environ.get('DAGSHUB_USERNAME')}")
+print(f"DagsHub Username: {os.getenv('DAGSHUB_USERNAME')}")
 print("Attempting to connect to MLflow...")
 
 try:
@@ -74,16 +74,16 @@ train_dir = os.path.join(base_dir, "train")
 val_dir = os.path.join(base_dir, "val")
 
 # Load datasets
-datasets = {
+datasets_dict = {
     'train': datasets.ImageFolder(train_dir, data_transforms['train']),
     'val': datasets.ImageFolder(val_dir, data_transforms['val'])
 }
 dataloaders = {
-    'train': data.DataLoader(datasets['train'], batch_size=batch_size, shuffle=True, num_workers=2),
-    'val': data.DataLoader(datasets['val'], batch_size=batch_size, shuffle=False, num_workers=2)
+    'train': data.DataLoader(datasets_dict['train'], batch_size=batch_size, shuffle=True, num_workers=2),
+    'val': data.DataLoader(datasets_dict['val'], batch_size=batch_size, shuffle=False, num_workers=2)
 }
-dataset_sizes = {x: len(datasets[x]) for x in ['train', 'val']}
-class_names = datasets['train'].classes
+dataset_sizes = {x: len(datasets_dict[x]) for x in ['train', 'val']}
+class_names = datasets_dict['train'].classes
 
 # Model initialization function
 def initialize_model(num_classes):
@@ -130,13 +130,13 @@ VAL_ACC = Gauge('val_accuracy', 'Validation accuracy')
 LEARNING_RATE = Gauge('learning_rate', 'Current learning rate')
 EPOCH_TIME = Gauge('epoch_time', 'Time per epoch in seconds')
 BATCH_TIME = Gauge('batch_time', 'Time per batch in seconds')
-GPU_MEMORY = Gauge('gpu_memory_usage', 'GPU memory usage in MB')
+BATCH_LOSS = Gauge('batch_loss', 'Loss per batch')
 
 # Start Prometheus metrics server
 start_http_server(8000)
 
 def log_to_grafana(metric_name, value, labels=None):
-    if not labels:
+    if labels is None:
         labels = {}
     
     # Update Prometheus metrics
@@ -148,30 +148,33 @@ def log_to_grafana(metric_name, value, labels=None):
         VAL_LOSS.set(value)
     elif metric_name == 'val_accuracy':
         VAL_ACC.set(value)
+    elif metric_name == 'learning_rate':
+        LEARNING_RATE.set(value)
+    elif metric_name == 'epoch_time':
+        EPOCH_TIME.set(value)
+    elif metric_name == 'batch_time':
+        BATCH_TIME.set(value)
     elif metric_name == 'batch_loss':
-        # Add new Gauge for batch metrics
-        BATCH_LOSS = Gauge('batch_loss', 'Loss per batch')
         BATCH_LOSS.set(value)
-    
-    # Log to Grafana Cloud with more frequent updates
+
+    # Prepare payload for Prometheus remote_write
     timestamp = int(datetime.now().timestamp() * 1000)
     metric = {
-        "metrics": [{
-            "name": metric_name,
-            "value": value,
-            "timestamp": timestamp,
-            "labels": labels
+        "streams": [{
+            "stream": labels,
+            "values": [[str(timestamp), str(value)]]
         }]
     }
-    
+
     try:
-        # Send to Prometheus
+        # Send to Prometheus remote_write
         response = requests.post(
-            os.environ.get('PROMETHEUS_REMOTE_WRITE_URL'),
+            os.getenv('PROMETHEUS_REMOTE_WRITE_URL'),
             json=metric,
             headers={"Content-Type": "application/json"},
-            auth=(os.environ.get('PROMETHEUS_USERNAME'), os.environ.get('PROMETHEUS_API_KEY'))
+            auth=('api_key', os.getenv('PROMETHEUS_API_KEY'))
         )
+        response.raise_for_status()
         
         # Send to Loki for logging
         log_message = {
@@ -192,13 +195,14 @@ def log_to_grafana(metric_name, value, labels=None):
             }]
         }
         
-        requests.post(
-            f"{os.environ.get('LOKI_URL')}/loki/api/v1/push",
+        loki_response = requests.post(
+            f"{os.getenv('LOKI_URL')}/loki/api/v1/push",
             json=loki_payload,
-            auth=(os.environ.get('LOKI_USERNAME'), os.environ.get('LOKI_API_KEY'))
+            auth=(os.getenv('LOKI_USERNAME'), os.getenv('LOKI_API_KEY'))
         )
+        loki_response.raise_for_status()
         
-        print(f"Metric sent: {metric_name}={value}")
+        print(f"Metric sent to Prometheus and Loki: {metric_name}={value}")
         return True
     except Exception as e:
         print(f"Error logging metric: {e}")
@@ -237,7 +241,6 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs):
 
                 running_loss = 0.0
                 running_corrects = 0
-                batch_times = []
 
                 # Add progress tracking
                 total_batches = len(dataloaders[phase])
@@ -257,8 +260,12 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs):
                             loss.backward()
                             optimizer.step()
 
-                    # Log batch metrics immediately
+                    # Calculate metrics
                     current_loss = loss.item()
+                    running_loss += current_loss * inputs.size(0)
+                    running_corrects += torch.sum(preds == labels.data)
+
+                    # Log batch metrics immediately
                     log_to_grafana('batch_loss', current_loss, {
                         'batch': str(batch_idx),
                         'epoch': str(epoch),
@@ -274,8 +281,8 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs):
                     
                     if batch_idx % 10 == 0:
                         print(f"\nBatch {batch_idx}/{total_batches} - Loss: {current_loss:.4f}")
-                
-                # Calculate and log metrics
+            
+                # Calculate and log epoch metrics
                 epoch_loss = running_loss / dataset_sizes[phase]
                 epoch_acc = running_corrects.double() / dataset_sizes[phase]
                 

@@ -18,90 +18,44 @@ jobs:
             - name: Configure Grafana Cloud
               env:
                   GRAFANA_CLOUD_API_KEY: ${{ secrets.GRAFANA_CLOUD_API_KEY }}
-                  GRAFANA_CLOUD_API_URL: ${{ secrets.GRAFANA_CLOUD_URL }}
                   PROMETHEUS_REMOTE_WRITE_URL: ${{ secrets.PROMETHEUS_REMOTE_WRITE_URL }}
-                  LOKI_URL: ${{ secrets.LOKI_URL }}
               run: |
                   # Setup Prometheus remote write configuration
                   cat > prometheus.yml << EOF
                   global:
                     scrape_interval: 15s
                     evaluation_interval: 15s
-                    
+
                   remote_write:
                     - url: ${PROMETHEUS_REMOTE_WRITE_URL}
                       basic_auth:
-                        username: ${GRAFANA_CLOUD_API_KEY}
+                        username: api_key
                         password: ${GRAFANA_CLOUD_API_KEY}
-                        
+
                   scrape_configs:
-                    - job_name: 'mlops-metrics'
+                    - job_name: 'prometheus'
+                      static_configs:
+                        - targets: ['localhost:9090']
+
+                    - job_name: 'train'
                       static_configs:
                         - targets: ['localhost:8000']
+
+                    - job_name: 'loki'
+                      static_configs:
+                        - targets: ['localhost:3100']
                   EOF
 
                   # Verify configuration
                   echo "Testing connection to Grafana Cloud..."
-                  curl -I -H "Authorization: Bearer ${GRAFANA_CLOUD_API_KEY}" ${GRAFANA_CLOUD_API_URL}/api/health
+                  curl -I -H "Authorization: Bearer ${GRAFANA_CLOUD_API_KEY}" https://arknravi.grafana.net/api/health
 
-            - name: Verify Grafana Cloud Integration
-              env:
-                  GRAFANA_CLOUD_API_KEY: ${{ secrets.GRAFANA_CLOUD_API_KEY }}
-                  PROMETHEUS_API_KEY: ${{ secrets.PROMETHEUS_API_KEY }}
-                  LOKI_API_KEY: ${{ secrets.LOKI_API_KEY }}
-                  GRAFANA_CLOUD_URL: "https://arknravi.grafana.net"
-                  PROMETHEUS_REMOTE_WRITE_URL: "https://prometheus-prod-37-prod-ap-southeast-1.grafana.net/api/prom/push"
-                  LOKI_URL: "https://logs-prod-020.grafana.net"
-                  PROMETHEUS_USERNAME: "1902030"
-                  LOKI_USERNAME: "1050298"
-              run: |
-                  # Check Grafana API health
-                  echo "Checking Grafana API..."
-                  GRAFANA_HEALTH=$(curl -s -H "Authorization: Bearer ${GRAFANA_CLOUD_API_KEY}" \
-                      "${GRAFANA_CLOUD_URL}/api/health")
-                  echo "Grafana Health: ${GRAFANA_HEALTH}"
+            - name: Upload Prometheus Configuration
+              uses: actions/upload-artifact@v2
+              with:
+                  name: prometheus-config
+                  path: prometheus.yml
 
-                  # Check Prometheus metrics dengan basic auth dan header tambahan
-                  echo "Checking Prometheus metrics..."
-                  PROM_RESPONSE=$(curl -s \
-                      -H "X-Scope-OrgID: ${PROMETHEUS_USERNAME}" \
-                      -u "${PROMETHEUS_USERNAME}:${PROMETHEUS_API_KEY}" \
-                      "https://prometheus-prod-37-prod-ap-southeast-1.grafana.net/api/prom/api/v1/query?query=up")
-                  echo "Prometheus Response: ${PROM_RESPONSE}"
-
-                  # Check Loki logs
-                  echo "Checking Loki logs..."
-                  LOKI_RESPONSE=$(curl -s \
-                      -u "${LOKI_USERNAME}:${LOKI_API_KEY}" \
-                      "https://logs-prod-020.grafana.net/loki/api/v1/labels")
-                  echo "Loki Response: ${LOKI_RESPONSE}"
-
-                  # Print dashboard URL
-                  echo "Grafana Dashboard URL: ${GRAFANA_CLOUD_URL}"
-
-                  # Verify all responses
-                  if echo "${GRAFANA_HEALTH}" | grep -q "database.*ok"; then
-                      echo "✅ Grafana connection successful"
-                  else
-                      echo "❌ Grafana connection failed"
-                      exit 1
-                  fi
-
-                  if ! echo "${PROM_RESPONSE}" | grep -q "error"; then
-                      echo "✅ Prometheus connection successful"
-                  else
-                      echo "❌ Prometheus connection failed"
-                      exit 1
-                  fi
-
-                  if ! echo "${LOKI_RESPONSE}" | grep -q "error"; then
-                      echo "✅ Loki connection successful"
-                  else
-                      echo "❌ Loki connection failed"
-                      exit 1
-                  fi
-
-    # Step 1: Build Base Image with Dependencies
     build_and_cache_dependencies:
         runs-on: ubuntu-latest
         steps:
@@ -119,10 +73,9 @@ jobs:
                   docker build -t ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest .
                   docker push ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest
 
-    # Step 2: Training and Evaluating Model with Prometheus and Grafana
     train_and_evaluate:
         runs-on: ubuntu-latest
-        needs: build_and_cache_dependencies
+        needs: [build_and_cache_dependencies, monitoring_setup]
         services:
             grafana:
                 image: grafana/grafana:latest
@@ -137,22 +90,27 @@ jobs:
             - name: Checkout repository
               uses: actions/checkout@v2
 
-            # Set up Prometheus configuration directory and remove existing Prometheus container if exists
-            - name: Set up Prometheus configuration and start Prometheus
+            - name: Download Prometheus Configuration
+              uses: actions/download-artifact@v2
+              with:
+                  name: prometheus-config
+                  path: ./prometheus_config
+
+            - name: Start Prometheus with Remote Write
               run: |
                   mkdir -p ./prometheus_config
-                  cp prometheus.yml ./prometheus_config/prometheus.yml
-
-                  # Stop and remove existing Prometheus container
+                  # Assuming prometheus.yml is downloaded to ./prometheus_config/prometheus.yml
                   docker stop prometheus || true
                   docker rm prometheus || true
-
-                  # Start Prometheus container
                   docker run -d --name prometheus -p 9090:9090 \
                     -v $(pwd)/prometheus_config/prometheus.yml:/etc/prometheus/prometheus.yml prom/prometheus:latest
 
-            # Debugging: Log environment variables to ensure they are set correctly
-            - name: Debugging - Log environment variables
+            - name: Verify Prometheus Remote Write
+              run: |
+                  echo "Verifying Prometheus remote_write configuration..."
+                  curl -s http://localhost:9090/api/v1/status/config | grep remote_write
+
+            - name: Log environment variables for debugging
               run: |
                   echo "DAGSHUB_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}"
                   echo "DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}"
@@ -171,39 +129,34 @@ jobs:
                   DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
                   PROMETHEUS_API_KEY: ${{ secrets.PROMETHEUS_API_KEY }}
                   LOKI_API_KEY: ${{ secrets.LOKI_API_KEY }}
-                  PROMETHEUS_USERNAME: "1902030"
-                  LOKI_USERNAME: "1050298"
-                  PROMETHEUS_REMOTE_WRITE_URL: "https://prometheus-prod-37-prod-ap-southeast-1.grafana.net/api/prom/push"
-                  LOKI_URL: "https://logs-prod-020.grafana.net"
-                  MLFLOW_TRACKING_URI: "https://dagshub.com/salsazufar/project-akhir-mlops.mlflow"
+                  PROMETHEUS_REMOTE_WRITE_URL: ${{ secrets.PROMETHEUS_REMOTE_WRITE_URL }}
+                  LOKI_URL: ${{ secrets.LOKI_URL }}
+                  MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
               run: |
                   docker pull ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest
 
                   docker run --rm \
-                      -e SUPABASE_S3_ENDPOINT="$SUPABASE_S3_ENDPOINT" \
-                      -e SUPABASE_S3_REGION="$SUPABASE_S3_REGION" \
-                      -e SUPABASE_S3_ACCESS_KEY_ID="$SUPABASE_S3_ACCESS_KEY_ID" \
-                      -e SUPABASE_S3_SECRET_ACCESS_KEY="$SUPABASE_S3_SECRET_ACCESS_KEY" \
-                      -e DAGSHUB_USERNAME="$DAGSHUB_USERNAME" \
-                      -e DAGSHUB_TOKEN="$DAGSHUB_TOKEN" \
-                      -e PROMETHEUS_API_KEY="$PROMETHEUS_API_KEY" \
-                      -e LOKI_API_KEY="$LOKI_API_KEY" \
-                      -e PROMETHEUS_USERNAME="$PROMETHEUS_USERNAME" \
-                      -e LOKI_USERNAME="$LOKI_USERNAME" \
-                      -e PROMETHEUS_REMOTE_WRITE_URL="$PROMETHEUS_REMOTE_WRITE_URL" \
-                      -e LOKI_URL="$LOKI_URL" \
-                      -e MLFLOW_TRACKING_URI="$MLFLOW_TRACKING_URI" \
-                      -v ${{ github.workspace }}:/app \
-                      -w /app \
-                      --network host \
-                      ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest \
-                      bash -c "
-                        echo 'Starting training...' &&
-                        python script/train.py &&
-                        python script/test.py
-                      "
+                    -e SUPABASE_S3_ENDPOINT="$SUPABASE_S3_ENDPOINT" \
+                    -e SUPABASE_S3_REGION="$SUPABASE_S3_REGION" \
+                    -e SUPABASE_S3_ACCESS_KEY_ID="$SUPABASE_S3_ACCESS_KEY_ID" \
+                    -e SUPABASE_S3_SECRET_ACCESS_KEY="$SUPABASE_S3_SECRET_ACCESS_KEY" \
+                    -e DAGSHUB_USERNAME="$DAGSHUB_USERNAME" \
+                    -e DAGSHUB_TOKEN="$DAGSHUB_TOKEN" \
+                    -e PROMETHEUS_API_KEY="$PROMETHEUS_API_KEY" \
+                    -e LOKI_API_KEY="$LOKI_API_KEY" \
+                    -e PROMETHEUS_REMOTE_WRITE_URL="$PROMETHEUS_REMOTE_WRITE_URL" \
+                    -e LOKI_URL="$LOKI_URL" \
+                    -e MLFLOW_TRACKING_URI="$MLFLOW_TRACKING_URI" \
+                    -v ${{ github.workspace }}:/app \
+                    -w /app \
+                    --network host \
+                    ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest \
+                    bash -c "
+                      echo 'Starting training...' &&
+                      python script/train.py &&
+                      python script/test.py
+                    "
 
-    # Step 3: Build and Push Final Docker Image with Model
     build_and_push_docker:
         runs-on: ubuntu-latest
         needs: train_and_evaluate

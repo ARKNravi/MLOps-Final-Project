@@ -1,18 +1,24 @@
 # prometheus.yml
 
 global:
-    scrape_interval: 15s
-    evaluation_interval: 15s
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+remote_write:
+  - url: https://prometheus-prod-37-prod-ap-southeast-1.grafana.net/api/prom/push
+    basic_auth:
+      username: glc_eyJvIjoiMTI3MzYzMSIsIm4iOiJtbG9wc193b3JrZmxvdy1yYXZpIiwiayI6InVaRjRwNnMzbkRzMG4yVHAxMjdmNDd1cSIsIm0iOnsiciI6InVzIn19
+      password: glc_eyJvIjoiMTI3MzYzMSIsIm4iOiJtbG9wc193b3JrZmxvdy1yYXZpIiwiayI6InVaRjRwNnMzbkRzMG4yVHAxMjdmNDd1cSIsIm0iOnsiciI6InVzIn19
 
 scrape_configs:
-    - job_name: "prometheus"
-      static_configs:
-          - targets: ["localhost:9090"]
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
 
-    - job_name: "train"
-      static_configs:
-          - targets: ["train:8000"]
+  - job_name: "train"
+    static_configs:
+      - targets: ["localhost:8000"]
 
-    - job_name: "loki"
-      static_configs:
-          - targets: ["loki:3100"]
+  - job_name: "loki"
+    static_configs:
+      - targets: ["localhost:3100"]
