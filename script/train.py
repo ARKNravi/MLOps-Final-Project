@@ -13,10 +13,9 @@ from sklearn.metrics import confusion_matrix
 import mlflow
 import mlflow.pytorch
 import requests
-from datetime import datetime
-from prometheus_client import start_http_server, Gauge
-import time
-import json
+from datetime import datetime, UTC
+import snappy as python_snappy
+from remote_write_pb2 import WriteRequest, TimeSeries, Label, Sample
 
 # MLflow configuration
 MLFLOW_TRACKING_URI = "https://dagshub.com/salsazufar/project-akhir-mlops.mlflow"
@@ -204,6 +203,52 @@ def log_to_grafana(metric_name, value, labels=None):
         print(f"Error logging metric: {e}")
         return False
 
+def send_metric_to_prometheus(metric_name, value, job="mlops_training"):
+    timestamp_ms = int(datetime.now(UTC).timestamp() * 1000)
+    
+    write_req = WriteRequest()
+    ts = write_req.timeseries.add()
+    
+    labels = [
+        ("__name__", metric_name),
+        ("job", job),
+        ("environment", "github_actions")
+    ]
+    
+    for name, value in labels:
+        label = ts.labels.add()
+        label.name = name
+        label.value = value
+    
+    sample = ts.samples.add()
+    sample.value = value
+    sample.timestamp = timestamp_ms
+    
+    data = write_req.SerializeToString()
+    compressed_data = python_snappy.compress(data)
+    
+    url = os.environ['PROMETHEUS_REMOTE_WRITE_URL']
+    username = os.environ['PROMETHEUS_USERNAME']
+    password = os.environ['PROMETHEUS_API_KEY']
+    
+    headers = {
+        "Content-Encoding": "snappy",
+        "Content-Type": "application/x-protobuf",
+        "X-Prometheus-Remote-Write-Version": "0.1.0"
+    }
+    
+    try:
+        response = requests.post(
+            url,
+            data=compressed_data,
+            auth=(username, password),
+            headers=headers
+        )
+        return response.status_code in [200, 204]
+    except Exception as e:
+        print(f"Error sending metric {metric_name}: {e}")
+        return False
+
 # Training function
 def train_model(model, criterion, optimizer, scheduler, num_epochs):
     best_model_wts = copy.deepcopy(model.state_dict())
@@ -312,6 +357,13 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs):
 
             if phase == 'train':
                 scheduler.step()
+
+            # Send metrics to Prometheus
+            send_metric_to_prometheus("train_loss", epoch_loss)
+            send_metric_to_prometheus("train_accuracy", epoch_acc)
+            send_metric_to_prometheus("val_loss", epoch_loss)
+            send_metric_to_prometheus("val_accuracy", epoch_acc)
+            send_metric_to_prometheus("epoch_time", epoch_time)
 
         # Save the best model
         model.load_state_dict(best_model_wts)

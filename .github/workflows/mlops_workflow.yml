@@ -228,48 +228,49 @@ jobs:
     train_and_evaluate:
         runs-on: ubuntu-latest
         needs: build_and_cache_dependencies
-        services:
-            grafana:
-                image: grafana/grafana:latest
-                ports:
-                    - 3000:3000
-            mlflow:
-                image: ghcr.io/mlflow/mlflow:v2.18.0rc0
-                ports:
-                    - 5000:5000
-
         steps:
             - name: Checkout repository
               uses: actions/checkout@v2
 
-            # Set up Prometheus configuration directory and remove existing Prometheus container if exists
-            - name: Set up Prometheus configuration and start Prometheus
+            - name: Install Prometheus Dependencies
               run: |
-                  mkdir -p ./prometheus_config
-                  cp prometheus.yml ./prometheus_config/prometheus.yml
+                  sudo apt-get update && sudo apt-get install -y python3-pip
+                  sudo apt-get install -y protobuf-compiler
+                  pip3 install prometheus-client requests python-snappy protobuf
 
-                  # Stop and remove existing Prometheus container
-                  docker stop prometheus || true
-                  docker rm prometheus || true
+                  # Setup Prometheus proto file
+                  cat > remote_write.proto << EOF
+                  syntax = "proto3";
+                  package prometheus;
 
-                  # Start Prometheus container
-                  docker run -d --name prometheus -p 9090:9090 \
-                    -v $(pwd)/prometheus_config/prometheus.yml:/etc/prometheus/prometheus.yml prom/prometheus:latest
+                  option go_package = "prompb";
 
-            # Debugging: Log environment variables to ensure they are set correctly
-            - name: Debugging - Log environment variables
-              run: |
-                  echo "DAGSHUB_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}"
-                  echo "DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}"
-                  echo "SUPABASE_S3_ENDPOINT: ${{ secrets.SUPABASE_S3_ENDPOINT }}"
-                  echo "SUPABASE_S3_REGION: ${{ secrets.SUPABASE_S3_REGION }}"
-                  echo "SUPABASE_S3_ACCESS_KEY_ID: ${{ secrets.SUPABASE_S3_ACCESS_KEY_ID }}"
-                  echo "SUPABASE_S3_SECRET_ACCESS_KEY: ${{ secrets.SUPABASE_S3_SECRET_ACCESS_KEY }}"
+                  message WriteRequest {
+                    repeated TimeSeries timeseries = 1;
+                  }
 
-            - name: Pull and Run Dependency Image
+                  message TimeSeries {
+                    repeated Label labels = 1;
+                    repeated Sample samples = 2;
+                  }
+
+                  message Label {
+                    string name = 1;
+                    string value = 2;
+                  }
+
+                  message Sample {
+                    double value = 1;
+                    int64 timestamp = 2;
+                  }
+                  EOF
+
+                  protoc --python_out=script/ remote_write.proto
+
+            - name: Train and Evaluate Model
               env:
-                  SUPABASE_S3_ENDPOINT: ${{ secrets.SUPABASE_S3_ENDPOINT }}
-                  SUPABASE_S3_REGION: ${{ secrets.SUPABASE_S3_REGION }}
+                  DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+                  DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
                   SUPABASE_S3_ACCESS_KEY_ID: ${{ secrets.SUPABASE_S3_ACCESS_KEY_ID }}
                   SUPABASE_S3_SECRET_ACCESS_KEY: ${{ secrets.SUPABASE_S3_SECRET_ACCESS_KEY }}
                   DAGSHUB_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
@@ -278,15 +279,13 @@ jobs:
                   LOKI_API_KEY: ${{ secrets.LOKI_API_KEY }}
                   PROMETHEUS_USERNAME: "1902030"
                   LOKI_USERNAME: "1050298"
-                  PROMETHEUS_REMOTE_WRITE_URL: "https://prometheus-prod-37-prod-ap-southeast-1.grafana.net/api/prom/push"
-                  LOKI_URL: "https://logs-prod-020.grafana.net"
-                  MLFLOW_TRACKING_URI: "https://dagshub.com/salsazufar/project-akhir-mlops.mlflow"
+                  PROMETHEUS_REMOTE_WRITE_URL: ${{ secrets.PROMETHEUS_REMOTE_WRITE_URL }}
+                  LOKI_URL: ${{ secrets.LOKI_URL }}
+                  MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
               run: |
-                  docker pull ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest
-
-                  docker run --rm \
-                      -e SUPABASE_S3_ENDPOINT="$SUPABASE_S3_ENDPOINT" \
-                      -e SUPABASE_S3_REGION="$SUPABASE_S3_REGION" \
+                  docker run \
+                      -e DOCKER_USERNAME="$DOCKER_USERNAME" \
+                      -e DOCKER_PASSWORD="$DOCKER_PASSWORD" \
                       -e SUPABASE_S3_ACCESS_KEY_ID="$SUPABASE_S3_ACCESS_KEY_ID" \
                       -e SUPABASE_S3_SECRET_ACCESS_KEY="$SUPABASE_S3_SECRET_ACCESS_KEY" \
                       -e DAGSHUB_USERNAME="$DAGSHUB_USERNAME" \
