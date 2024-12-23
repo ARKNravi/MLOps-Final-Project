@@ -70,56 +70,45 @@ jobs:
                   import requests
                   import snappy
                   from prometheus_client import CollectorRegistry, Gauge
-                  from prometheus_client.core import Sample, Metric
                   import os
-                  import struct
-                  from prometheus_client.samples import Exemplar
+                  from google.protobuf import timestamp_pb2
+                  from prometheus_client.openmetrics.exposition import generate_latest
+                  from prometheus_client.samples import Sample
 
-                  def create_prometheus_write_request():
-                      # Buat timestamp dalam format yang benar
-                      timestamp_ms = int(time.time() * 1000)
+                  def create_write_request():
+                      # Buat registry dan metrik
+                      registry = CollectorRegistry()
+                      g = Gauge('test_metric', 'Test metric', 
+                              labelnames=['environment', 'job', 'instance'],
+                              registry=registry)
+                      g.labels(environment='github_actions',
+                             job='github_actions_test',
+                             instance='test').set(1.0)
 
-                      # Buat label dalam format yang benar
-                      labels = [
-                          {'name': '__name__', 'value': 'test_metric'},
-                          {'name': 'job', 'value': 'github_actions_test'},
-                          {'name': 'instance', 'value': 'test'},
-                          {'name': 'environment', 'value': 'github_actions'}
-                      ]
+                      # Generate metrik dalam format OpenMetrics
+                      metric_data = generate_latest(registry)
+                      
+                      # Buat timestamp
+                      ts = timestamp_pb2.Timestamp()
+                      ts.GetCurrentTime()
 
-                      # Buat timeseries dalam format yang benar
-                      timeseries = {
-                          'labels': labels,
-                          'samples': [{'value': 1.0, 'timestamp': timestamp_ms}]
-                      }
-
-                      # Buat write request dalam format yang benar
+                      # Format write request sesuai dengan Prometheus Remote Write Protocol
                       write_request = {
-                          'timeseries': [timeseries]
+                          'timeseries': [{
+                              'labels': [
+                                  {'name': '__name__', 'value': 'test_metric'},
+                                  {'name': 'environment', 'value': 'github_actions'},
+                                  {'name': 'job', 'value': 'github_actions_test'},
+                                  {'name': 'instance', 'value': 'test'}
+                              ],
+                              'samples': [{
+                                  'value': 1.0,
+                                  'timestamp': int(time.time() * 1000)
+                              }]
+                          }]
                       }
 
-                      # Konversi ke format protobuf yang benar
-                      data = b''
-                      for ts in write_request['timeseries']:
-                          # Write labels
-                          for label in ts['labels']:
-                              # Write label name length and name
-                              name_bytes = label['name'].encode('utf-8')
-                              data += struct.pack('!H', len(name_bytes))
-                              data += name_bytes
-                              # Write label value length and value
-                              value_bytes = label['value'].encode('utf-8')
-                              data += struct.pack('!H', len(value_bytes))
-                              data += value_bytes
-
-                          # Write samples
-                          for sample in ts['samples']:
-                              # Write timestamp (64-bit integer)
-                              data += struct.pack('!Q', sample['timestamp'])
-                              # Write value (64-bit float)
-                              data += struct.pack('!d', sample['value'])
-
-                      return data
+                      return metric_data
 
                   def send_metric():
                       url = os.environ['PROMETHEUS_REMOTE_WRITE_URL']
@@ -127,8 +116,8 @@ jobs:
                       password = os.environ['PROMETHEUS_API_KEY']
 
                       try:
-                          # Buat dan kompres data
-                          data = create_prometheus_write_request()
+                          # Generate dan kompres data
+                          data = create_write_request()
                           compressed_data = snappy.compress(data)
 
                           # Kirim request
@@ -157,6 +146,8 @@ jobs:
                                   print(f"Error: {response.text}")
                       except Exception as e:
                           print(f"Error sending metric: {e}")
+                          print(f"Exception type: {type(e)}")
+                          print(f"Exception args: {e.args}")
                           exit(1)
 
                   if __name__ == "__main__":
