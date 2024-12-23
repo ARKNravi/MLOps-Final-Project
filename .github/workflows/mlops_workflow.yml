@@ -47,27 +47,33 @@ jobs:
             - name: Verify Grafana Cloud Integration
               env:
                   GRAFANA_CLOUD_API_KEY: ${{ secrets.GRAFANA_CLOUD_API_KEY }}
-                  GRAFANA_CLOUD_API_URL: ${{ secrets.GRAFANA_CLOUD_URL }}
-                  PROMETHEUS_REMOTE_WRITE_URL: ${{ secrets.PROMETHEUS_REMOTE_WRITE_URL }}
-                  LOKI_URL: ${{ secrets.LOKI_URL }}
+                  GRAFANA_CLOUD_URL: "https://arknravi.grafana.net"
+                  PROMETHEUS_REMOTE_WRITE_URL: "https://prometheus-prod-37-prod-ap-southeast-1.grafana.net/api/prom/push"
+                  LOKI_URL: "https://logs-prod-020.grafana.net"
               run: |
+                  # Common headers
+                  HEADERS=(
+                    -H "X-Scope-OrgID: arknravi"
+                    -H "Content-Type: application/json"
+                  )
+
                   # Check Grafana API health
                   echo "Checking Grafana API..."
                   GRAFANA_HEALTH=$(curl -s -H "Authorization: Bearer ${GRAFANA_CLOUD_API_KEY}" \
                       "${GRAFANA_CLOUD_API_URL}/api/health")
                   echo "Grafana Health: ${GRAFANA_HEALTH}"
 
-                  # Check Prometheus metrics dengan basic auth
+                  # Check Prometheus metrics
                   echo "Checking Prometheus metrics..."
-                  PROM_RESPONSE=$(curl -s -u "${GRAFANA_CLOUD_API_KEY}:" \
+                  PROM_RESPONSE=$(curl -s "${HEADERS[@]}" \
+                      -H "Authorization: Basic $(echo -n ${GRAFANA_CLOUD_API_KEY}: | base64)" \
                       "${PROMETHEUS_REMOTE_WRITE_URL%/push}/api/v1/query?query=up")
-                  echo "Prometheus Response: ${PROM_RESPONSE}"
 
-                  # Check Loki logs dengan basic auth
+                  # Check Loki logs
                   echo "Checking Loki logs..."
-                  LOKI_RESPONSE=$(curl -s -u "${GRAFANA_CLOUD_API_KEY}:" \
+                  LOKI_RESPONSE=$(curl -s "${HEADERS[@]}" \
+                      -H "Authorization: Basic $(echo -n ${GRAFANA_CLOUD_API_KEY}: | base64)" \
                       "${LOKI_URL}/loki/api/v1/labels")
-                  echo "Loki Response: ${LOKI_RESPONSE}"
 
                   # Print dashboard URL
                   echo "Grafana Dashboard URL: ${GRAFANA_CLOUD_API_URL}"
