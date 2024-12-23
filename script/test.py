@@ -192,32 +192,24 @@ def log_to_grafana(metric_name, value, labels=None):
     labels['job'] = 'mlops_training'
     
     try:
-        # Buat timestamp dalam format yang benar
-        timestamp = int(time.time() * 1000)
-        
-        # Format data untuk Prometheus remote write
-        write_request = {
-            "timeseries": [{
-                "labels": [
-                    {"name": "__name__", "value": metric_name}
-                ] + [
-                    {"name": k, "value": str(v)}
-                    for k, v in labels.items()
-                ],
-                "samples": [
-                    {"timestamp": timestamp, "value": float(value)}
-                ]
+        # Format metrik untuk Grafana Cloud
+        metric_data = {
+            'metrics': [{
+                'name': metric_name,
+                'type': 'gauge',
+                'value': float(value),
+                'timestamp': int(time.time() * 1000),
+                'labels': labels
             }]
         }
         
         # Kirim ke Prometheus
         response = requests.post(
             os.environ.get('PROMETHEUS_REMOTE_WRITE_URL'),
-            json=write_request,
+            json=metric_data,
             auth=(os.environ.get('PROMETHEUS_USERNAME'), os.environ.get('PROMETHEUS_API_KEY')),
             headers={
                 'Content-Type': 'application/json',
-                'X-Prometheus-Remote-Write-Version': '0.1.0',
                 'X-Scope-OrgID': os.environ.get('PROMETHEUS_USERNAME')
             }
         )
