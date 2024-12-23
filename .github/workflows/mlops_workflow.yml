@@ -95,15 +95,15 @@ jobs:
                       password = os.environ['PROMETHEUS_API_KEY']
 
                       try:
+                          headers = {
+                              "Authorization": f"Bearer {os.environ.get('PROMETHEUS_API_KEY')}",
+                              "Content-Type": "application/json"
+                          }
                           response = requests.post(
                               url,
                               json=metric_data,
                               auth=(username, password),
-                              headers={
-                                  'Content-Type': 'application/json',
-                                  'X-Scope-OrgID': username,
-                                  'User-Agent': 'monitoring-test/1.0.0'
-                              }
+                              headers=headers
                           )
                           
                           print(f"Status code: {response.status_code}")
@@ -118,7 +118,7 @@ jobs:
                               if response.text:
                                   print(f"Error: {response.text}")
                               print(f"Request URL: {url}")
-                              print(f"Request headers: {response.request.headers}")
+                              print(f"Request headers: {headers}")
                               print(f"Request body: {json.dumps(metric_data, indent=2)}")
                       except Exception as e:
                           print(f"Error sending metric: {e}")
