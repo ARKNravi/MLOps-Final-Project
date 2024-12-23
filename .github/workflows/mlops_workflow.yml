@@ -32,24 +32,72 @@ jobs:
               run: |
                   docker-compose -f docker-compose.monitoring.yml up -d
 
-            - name: Start ngrok tunnels
+            - name: Configure and start ngrok
               env:
                   NGROK_AUTHTOKEN: ${{ secrets.NGROK_AUTHTOKEN }}
               run: |
-                  ngrok authtoken $NGROK_AUTHTOKEN
-                  ngrok start --all --config ngrok.yml &
-                  sleep 10
-                  curl http://localhost:4040/api/tunnels > tunnels.json
+                  # Create ngrok config with the actual token
+                  cat > ngrok.yml << EOF
+                  version: "2"
+                  authtoken: ${{ secrets.NGROK_AUTHTOKEN }}
+                  tunnels:
+                      grafana:
+                          addr: 3000
+                          proto: http
+                      prometheus:
+                          addr: 9090
+                          proto: http
+                      loki:
+                          addr: 3100
+                          proto: http
+                  EOF
 
-                  # Extract URLs
+                  # Start ngrok in background
+                  ngrok start --all --config ngrok.yml > ngrok.log 2>&1 &
+
+                  # Wait for ngrok to start
+                  echo "Waiting for ngrok to start..."
+                  for i in {1..30}; do
+                      if curl -s http://localhost:4040/api/tunnels > /dev/null; then
+                          echo "Ngrok is running"
+                          break
+                      fi
+                      if [ $i -eq 30 ]; then
+                          echo "Timeout waiting for ngrok"
+                          cat ngrok.log
+                          exit 1
+                      fi
+                      sleep 1
+                  done
+
+                  # Get tunnel URLs
+                  curl -s http://localhost:4040/api/tunnels > tunnels.json
+
+                  # Extract and display URLs
                   GRAFANA_URL=$(jq -r '.tunnels[] | select(.name=="grafana") | .public_url' tunnels.json)
                   PROMETHEUS_URL=$(jq -r '.tunnels[] | select(.name=="prometheus") | .public_url' tunnels.json)
                   LOKI_URL=$(jq -r '.tunnels[] | select(.name=="loki") | .public_url' tunnels.json)
 
-                  # Save URLs as artifacts
+                  echo "Grafana URL: $GRAFANA_URL"
+                  echo "Prometheus URL: $PROMETHEUS_URL"
+                  echo "Loki URL: $LOKI_URL"
+
+                  # Save URLs as environment variables
                   echo "GRAFANA_URL=$GRAFANA_URL" >> $GITHUB_ENV
                   echo "PROMETHEUS_URL=$PROMETHEUS_URL" >> $GITHUB_ENV
                   echo "LOKI_URL=$LOKI_URL" >> $GITHUB_ENV
+
+            # Optional: Verify services are accessible
+            - name: Verify services
+              run: |
+                  echo "Checking Grafana..."
+                  curl -s $GRAFANA_URL/api/health
+
+                  echo "Checking Prometheus..."
+                  curl -s $PROMETHEUS_URL/-/healthy
+
+                  echo "Checking Loki..."
+                  curl -s $LOKI_URL/ready
 
     # Step 1: Build Base Image with Dependencies
     build_and_cache_dependencies:
