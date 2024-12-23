@@ -212,62 +212,79 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs):
 
                 # Add progress tracking
                 total_batches = len(dataloaders[phase])
-                print(f"\n{phase} phase:")
+                print(f"\n{phase} phase - Total batches: {total_batches}")
 
                 for batch_idx, (inputs, labels) in enumerate(dataloaders[phase]):
-                    batch_start_time = time.time()
-                    inputs = inputs.to(device)
-                    labels = labels.to(device)
-
-                    optimizer.zero_grad()
-
-                    with torch.set_grad_enabled(phase == 'train'):
-                        outputs = model(inputs)
-                        _, preds = torch.max(outputs, 1)
-                        loss = criterion(outputs, labels)
-
-                        if phase == 'train':
-                            loss.backward()
-                            optimizer.step()
-
-                    running_loss += loss.item() * inputs.size(0)
-                    running_corrects += torch.sum(preds == labels.data)
-
-                    # Calculate and log batch metrics
-                    batch_time = time.time() - batch_start_time
-                    batch_times.append(batch_time)
-                    send_metric_to_prometheus("batch_time", batch_time)
+                    if batch_idx % 5 == 0:  # Print progress every 5 batches
+                        print(f"Processing batch {batch_idx}/{total_batches}")
                     
-                    if batch_idx % 10 == 0:  # Log every 10 batches
-                        batch_loss = loss.item()
-                        batch_acc = torch.sum(preds == labels.data).double() / inputs.size(0)
-                        
-                        if phase == 'train':
-                            send_metric_to_prometheus("train_loss", batch_loss)
-                            send_metric_to_prometheus("train_accuracy", batch_acc)
-                        else:
-                            send_metric_to_prometheus("val_loss", batch_loss)
-                            send_metric_to_prometheus("val_accuracy", batch_acc)
+                    try:
+                        batch_start_time = time.time()
+                        inputs = inputs.to(device)
+                        labels = labels.to(device)
 
+                        optimizer.zero_grad()
+
+                        with torch.set_grad_enabled(phase == 'train'):
+                            outputs = model(inputs)
+                            _, preds = torch.max(outputs, 1)
+                            loss = criterion(outputs, labels)
+
+                            if phase == 'train':
+                                loss.backward()
+                                optimizer.step()
+
+                        running_loss += loss.item() * inputs.size(0)
+                        running_corrects += torch.sum(preds == labels.data)
+
+                        # Calculate and log batch metrics
+                        batch_time = time.time() - batch_start_time
+                        batch_times.append(batch_time)
+                        
+                        try:
+                            send_metric_to_prometheus("batch_time", batch_time)
+                            if batch_idx % 10 == 0:  # Log every 10 batches
+                                batch_loss = loss.item()
+                                batch_acc = torch.sum(preds == labels.data).double() / inputs.size(0)
+                                
+                                if phase == 'train':
+                                    send_metric_to_prometheus("train_loss", batch_loss)
+                                    send_metric_to_prometheus("train_accuracy", float(batch_acc))
+                                else:
+                                    send_metric_to_prometheus("val_loss", batch_loss)
+                                    send_metric_to_prometheus("val_accuracy", float(batch_acc))
+                                print(f"Batch {batch_idx} - Loss: {batch_loss:.4f}, Accuracy: {float(batch_acc):.4f}")
+                        except Exception as e:
+                            print(f"Error sending metrics to Prometheus: {e}")
+                            continue
+                            
+                    except Exception as e:
+                        print(f"Error processing batch {batch_idx}: {e}")
+                        continue
+
+                print(f"Completed {phase} phase")
                 epoch_loss = running_loss / dataset_sizes[phase]
                 epoch_acc = running_corrects.double() / dataset_sizes[phase]
 
                 print(f'{phase} Loss: {epoch_loss:.4f} Acc: {epoch_acc:.4f}')
 
                 # Log metrics for the epoch
-                if phase == 'train':
-                    current_lr = optimizer.param_groups[0]['lr']
-                    send_metric_to_prometheus("learning_rate", current_lr)
-                    send_metric_to_prometheus("train_loss", epoch_loss)
-                    send_metric_to_prometheus("train_accuracy", epoch_acc)
-                    mlflow.log_metric("train_loss", epoch_loss, step=epoch)
-                    mlflow.log_metric("train_accuracy", epoch_acc, step=epoch)
-                    mlflow.log_metric("learning_rate", current_lr, step=epoch)
-                else:
-                    send_metric_to_prometheus("val_loss", epoch_loss)
-                    send_metric_to_prometheus("val_accuracy", epoch_acc)
-                    mlflow.log_metric("val_loss", epoch_loss, step=epoch)
-                    mlflow.log_metric("val_accuracy", epoch_acc, step=epoch)
+                try:
+                    if phase == 'train':
+                        current_lr = optimizer.param_groups[0]['lr']
+                        send_metric_to_prometheus("learning_rate", current_lr)
+                        send_metric_to_prometheus("train_loss", epoch_loss)
+                        send_metric_to_prometheus("train_accuracy", float(epoch_acc))
+                        mlflow.log_metric("train_loss", epoch_loss, step=epoch)
+                        mlflow.log_metric("train_accuracy", float(epoch_acc), step=epoch)
+                        mlflow.log_metric("learning_rate", current_lr, step=epoch)
+                    else:
+                        send_metric_to_prometheus("val_loss", epoch_loss)
+                        send_metric_to_prometheus("val_accuracy", float(epoch_acc))
+                        mlflow.log_metric("val_loss", epoch_loss, step=epoch)
+                        mlflow.log_metric("val_accuracy", float(epoch_acc), step=epoch)
+                except Exception as e:
+                    print(f"Error logging epoch metrics: {e}")
 
                 # Save best model weights
                 if phase == 'val' and epoch_acc > best_acc:
@@ -276,12 +293,16 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs):
 
             # Log epoch time
             epoch_time = time.time() - epoch_start_time
-            send_metric_to_prometheus("epoch_time", epoch_time)
-            mlflow.log_metric("epoch_time", epoch_time, step=epoch)
+            try:
+                send_metric_to_prometheus("epoch_time", epoch_time)
+                mlflow.log_metric("epoch_time", epoch_time, step=epoch)
+            except Exception as e:
+                print(f"Error logging epoch time: {e}")
 
             if phase == 'train':
                 scheduler.step()
 
+        print("Training completed!")
         # Save the best model
         model.load_state_dict(best_model_wts)
         mlflow.pytorch.log_model(model, "best_model")
