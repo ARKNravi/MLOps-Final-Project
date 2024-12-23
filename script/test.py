@@ -192,13 +192,13 @@ def log_to_grafana(metric_name, value, labels=None):
     labels['job'] = 'mlops_training'
     
     try:
-        # Buat registry dan metrik
+        # Buat registry dan metrik dengan OpenMetrics format
         registry = CollectorRegistry()
         g = Gauge(metric_name, f'Metric {metric_name}', labelnames=labels.keys(), registry=registry)
         g.labels(**labels).set(float(value))
         
-        # Generate Prometheus format dan kompres
-        data = generate_latest(registry)
+        # Generate dalam format OpenMetrics dan kompres
+        data = generate_openmetrics(registry)
         compressed_data = snappy.compress(data)
         
         # Kirim ke Prometheus
@@ -210,7 +210,8 @@ def log_to_grafana(metric_name, value, labels=None):
                 'Content-Type': 'application/x-protobuf',
                 'Content-Encoding': 'snappy',
                 'X-Prometheus-Remote-Write-Version': '0.1.0',
-                'X-Scope-OrgID': os.environ.get('PROMETHEUS_USERNAME')
+                'X-Scope-OrgID': os.environ.get('PROMETHEUS_USERNAME'),
+                'User-Agent': 'mlops-monitoring/1.0.0'
             }
         )
         

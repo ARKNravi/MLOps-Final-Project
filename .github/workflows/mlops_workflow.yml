@@ -69,58 +69,32 @@ jobs:
                   import time
                   import requests
                   import snappy
-                  from prometheus_client import CollectorRegistry, Gauge
+                  from prometheus_client import CollectorRegistry, Gauge, generate_latest
+                  from prometheus_client.openmetrics.exposition import generate_latest as generate_openmetrics
                   import os
-                  from google.protobuf import timestamp_pb2
-                  from prometheus_client.openmetrics.exposition import generate_latest
                   from prometheus_client.samples import Sample
-
-                  def create_write_request():
-                      # Buat registry dan metrik
-                      registry = CollectorRegistry()
-                      g = Gauge('test_metric', 'Test metric', 
-                              labelnames=['environment', 'job', 'instance'],
-                              registry=registry)
-                      g.labels(environment='github_actions',
-                             job='github_actions_test',
-                             instance='test').set(1.0)
-
-                      # Generate metrik dalam format OpenMetrics
-                      metric_data = generate_latest(registry)
-                      
-                      # Buat timestamp
-                      ts = timestamp_pb2.Timestamp()
-                      ts.GetCurrentTime()
-
-                      # Format write request sesuai dengan Prometheus Remote Write Protocol
-                      write_request = {
-                          'timeseries': [{
-                              'labels': [
-                                  {'name': '__name__', 'value': 'test_metric'},
-                                  {'name': 'environment', 'value': 'github_actions'},
-                                  {'name': 'job', 'value': 'github_actions_test'},
-                                  {'name': 'instance', 'value': 'test'}
-                              ],
-                              'samples': [{
-                                  'value': 1.0,
-                                  'timestamp': int(time.time() * 1000)
-                              }]
-                          }]
-                      }
-
-                      return metric_data
+                  from prometheus_client.metrics_core import Metric
 
                   def send_metric():
+                      # Buat timestamp dalam format yang benar (milliseconds)
+                      timestamp_ms = int(time.time() * 1000)
+                      
+                      # Buat metrik dalam format OpenMetrics
+                      registry = CollectorRegistry()
+                      g = Gauge('test_metric', 'Test metric', registry=registry)
+                      g.set(1.0)
+                      
+                      # Generate dalam format OpenMetrics
+                      data = generate_openmetrics(registry)
+                      
+                      # Kompres data dengan snappy
+                      compressed_data = snappy.compress(data)
+
                       url = os.environ['PROMETHEUS_REMOTE_WRITE_URL']
                       username = os.environ['PROMETHEUS_USERNAME']
                       password = os.environ['PROMETHEUS_API_KEY']
 
                       try:
-                          # Generate dan kompres data
-                          data = create_write_request()
-                          compressed_data = snappy.compress(data)
-
-                          # Kirim request
                           response = requests.post(
                               url,
                               data=compressed_data,
@@ -129,7 +103,8 @@ jobs:
                                   'Content-Type': 'application/x-protobuf',
                                   'Content-Encoding': 'snappy',
                                   'X-Prometheus-Remote-Write-Version': '0.1.0',
-                                  'X-Scope-OrgID': username
+                                  'X-Scope-OrgID': username,
+                                  'User-Agent': 'monitoring-test/1.0.0'
                               }
                           )
                           
@@ -144,10 +119,10 @@ jobs:
                               print("❌ Failed to send metric")
                               if response.text:
                                   print(f"Error: {response.text}")
+                              print(f"Request URL: {url}")
+                              print(f"Request headers: {response.request.headers}")
                       except Exception as e:
                           print(f"Error sending metric: {e}")
-                          print(f"Exception type: {type(e)}")
-                          print(f"Exception args: {e.args}")
                           exit(1)
 
                   if __name__ == "__main__":
