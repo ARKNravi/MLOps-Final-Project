@@ -57,20 +57,42 @@ jobs:
                       "${GRAFANA_CLOUD_API_URL}/api/health")
                   echo "Grafana Health: ${GRAFANA_HEALTH}"
 
-                  # Check Prometheus metrics
+                  # Check Prometheus metrics dengan basic auth
                   echo "Checking Prometheus metrics..."
-                  PROM_RESPONSE=$(curl -s -H "Authorization: Bearer ${GRAFANA_CLOUD_API_KEY}" \
-                      "${GRAFANA_CLOUD_API_URL}/api/v1/query?query=up")
+                  PROM_RESPONSE=$(curl -s -u "${GRAFANA_CLOUD_API_KEY}:" \
+                      "${PROMETHEUS_REMOTE_WRITE_URL%/push}/api/v1/query?query=up")
                   echo "Prometheus Response: ${PROM_RESPONSE}"
 
-                  # Check Loki logs
+                  # Check Loki logs dengan basic auth
                   echo "Checking Loki logs..."
-                  LOKI_RESPONSE=$(curl -s -H "Authorization: Bearer ${GRAFANA_CLOUD_API_KEY}" \
+                  LOKI_RESPONSE=$(curl -s -u "${GRAFANA_CLOUD_API_KEY}:" \
                       "${LOKI_URL}/loki/api/v1/labels")
                   echo "Loki Response: ${LOKI_RESPONSE}"
 
                   # Print dashboard URL
-                  echo "Grafana Dashboard URL: ${GRAFANA_CLOUD_API_URL}/dashboards"
+                  echo "Grafana Dashboard URL: ${GRAFANA_CLOUD_API_URL}"
+
+                  # Verify all responses
+                  if echo "${GRAFANA_HEALTH}" | grep -q "database.*ok"; then
+                      echo "✅ Grafana connection successful"
+                  else
+                      echo "❌ Grafana connection failed"
+                      exit 1
+                  fi
+
+                  if ! echo "${PROM_RESPONSE}" | grep -q "error"; then
+                      echo "✅ Prometheus connection successful"
+                  else
+                      echo "❌ Prometheus connection failed"
+                      exit 1
+                  fi
+
+                  if ! echo "${LOKI_RESPONSE}" | grep -q "error"; then
+                      echo "✅ Loki connection successful"
+                  else
+                      echo "❌ Loki connection failed"
+                      exit 1
+                  fi
 
     # Step 1: Build Base Image with Dependencies
     build_and_cache_dependencies:
