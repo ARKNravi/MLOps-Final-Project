@@ -62,7 +62,7 @@ jobs:
                   # Install dependencies
                   sudo apt-get update && sudo apt-get install -y python3-pip
                   sudo apt-get install -y protobuf-compiler
-                  pip3 install prometheus-client requests snappy protobuf
+                  pip3 install prometheus-client requests python-snappy protobuf
                   # Buat file proto secara inline
                   cat > remote_write.proto << EOF
                   syntax = "proto3";
@@ -100,14 +100,14 @@ jobs:
                   cat > send_metric.py << EOF
                   import os
                   import json
-                  import snappy
+                  import snappy as python_snappy
                   import requests
                   from remote_write_pb2 import WriteRequest, TimeSeries, Label, Sample
-                  from datetime import datetime
+                  from datetime import datetime, UTC
 
                   def send_metric():
                       # Buat timestamp dalam format yang benar (nanodetik)
-                      timestamp_ns = int(datetime.utcnow().timestamp() * 1e9)
+                      timestamp_ns = int(datetime.now(UTC).timestamp() * 1e9)
                       
                       # Inisialisasi WriteRequest
                       write_req = WriteRequest()
@@ -137,7 +137,7 @@ jobs:
                       data = write_req.SerializeToString()
                       
                       # Kompresi dengan Snappy
-                      compressed_data = snappy.compress(data)
+                      compressed_data = python_snappy.compress(data)
                       
                       url = os.environ['PROMETHEUS_REMOTE_WRITE_URL']
                       username = os.environ['PROMETHEUS_USERNAME']
