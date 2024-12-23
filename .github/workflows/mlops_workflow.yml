@@ -47,9 +47,17 @@ jobs:
                 - targets: ['localhost:3100']
           EOF
 
-          # Verify configuration
+          # Verify configuration by checking Grafana Cloud health endpoint
           echo "Testing connection to Grafana Cloud..."
-          curl -I -H "Authorization: Bearer ${GRAFANA_CLOUD_API_KEY}" https://arknravi.grafana.net/api/health
+          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${GRAFANA_CLOUD_API_KEY}" https://arknravi.grafana.net/api/health)
+          echo "Grafana Cloud Health HTTP Status: $RESPONSE"
+          
+          if [ "$RESPONSE" -ne 200 ]; then
+            echo "❌ Grafana Cloud health check failed with status $RESPONSE"
+            exit 1
+          else
+            echo "✅ Grafana Cloud health check passed"
+          fi
 
       - name: Upload Prometheus Configuration
         uses: actions/upload-artifact@v3
@@ -100,16 +108,23 @@ jobs:
       - name: Start Prometheus with Remote Write
         run: |
           mkdir -p ./prometheus_config
-          # Assuming prometheus.yml is downloaded to ./prometheus_config/prometheus.yml
+          # Stop and remove any existing Prometheus container
           docker stop prometheus || true
           docker rm prometheus || true
+          # Start Prometheus container with the remote_write configuration
           docker run -d --name prometheus -p 9090:9090 \
             -v $(pwd)/prometheus_config/prometheus.yml:/etc/prometheus/prometheus.yml prom/prometheus:latest
 
       - name: Verify Prometheus Remote Write
         run: |
           echo "Verifying Prometheus remote_write configuration..."
-          curl -s http://localhost:9090/api/v1/status/config | grep remote_write
+          CONFIG_STATUS=$(curl -s http://localhost:9090/api/v1/status/config | grep remote_write)
+          if [ -z "$CONFIG_STATUS" ]; then
+            echo "❌ remote_write configuration not found in Prometheus config"
+            exit 1
+          else
+            echo "✅ remote_write configuration is present"
+          fi
 
       - name: Log environment variables for debugging
         run: |
