@@ -61,14 +61,15 @@ jobs:
                       "${GRAFANA_CLOUD_URL}/api/health")
                   echo "Grafana Health: ${GRAFANA_HEALTH}"
 
-                  # Check Prometheus metrics dengan basic auth
+                  # Check Prometheus metrics dengan basic auth dan header tambahan
                   echo "Checking Prometheus metrics..."
                   PROM_RESPONSE=$(curl -s \
+                      -H "X-Scope-OrgID: ${PROMETHEUS_USERNAME}" \
                       -u "${PROMETHEUS_USERNAME}:${PROMETHEUS_API_KEY}" \
                       "https://prometheus-prod-37-prod-ap-southeast-1.grafana.net/api/prom/api/v1/query?query=up")
                   echo "Prometheus Response: ${PROM_RESPONSE}"
 
-                  # Check Loki logs dengan basic auth
+                  # Check Loki logs
                   echo "Checking Loki logs..."
                   LOKI_RESPONSE=$(curl -s \
                       -u "${LOKI_USERNAME}:${LOKI_API_KEY}" \
