@@ -62,33 +62,33 @@ jobs:
               run: |
                   # Install dependencies
                   sudo apt-get update && sudo apt-get install -y python3-pip
-                  pip3 install prometheus-client requests protobuf python-snappy
+                  pip3 install prometheus-client requests
 
                   # Buat script Python untuk mengirim metrik
                   cat > send_metric.py << EOF
                   import time
                   import requests
-                  import snappy
-                  from prometheus_client import CollectorRegistry, Gauge, generate_latest
-                  from prometheus_client.openmetrics.exposition import generate_latest as generate_openmetrics
+                  import json
                   import os
-                  from prometheus_client.samples import Sample
-                  from prometheus_client.metrics_core import Metric
 
                   def send_metric():
-                      # Buat timestamp dalam format yang benar (milliseconds)
+                      # Buat timestamp dalam format yang benar
                       timestamp_ms = int(time.time() * 1000)
                       
-                      # Buat metrik dalam format OpenMetrics
-                      registry = CollectorRegistry()
-                      g = Gauge('test_metric', 'Test metric', registry=registry)
-                      g.set(1.0)
-                      
-                      # Generate dalam format OpenMetrics
-                      data = generate_openmetrics(registry)
-                      
-                      # Kompres data dengan snappy
-                      compressed_data = snappy.compress(data)
+                      # Format metrik sesuai dengan Grafana Cloud Prometheus API
+                      metric_data = {
+                          "series": [{
+                              "labels": [
+                                  {"name": "__name__", "value": "test_metric"},
+                                  {"name": "job", "value": "github_actions_test"},
+                                  {"name": "instance", "value": "test"},
+                                  {"name": "environment", "value": "github_actions"}
+                              ],
+                              "samples": [
+                                  [timestamp_ms, "1.0"]
+                              ]
+                          }]
+                      }
 
                       url = os.environ['PROMETHEUS_REMOTE_WRITE_URL']
                       username = os.environ['PROMETHEUS_USERNAME']
@@ -97,12 +97,10 @@ jobs:
                       try:
                           response = requests.post(
                               url,
-                              data=compressed_data,
+                              json=metric_data,
                               auth=(username, password),
                               headers={
-                                  'Content-Type': 'application/x-protobuf',
-                                  'Content-Encoding': 'snappy',
-                                  'X-Prometheus-Remote-Write-Version': '0.1.0',
+                                  'Content-Type': 'application/json',
                                   'X-Scope-OrgID': username,
                                   'User-Agent': 'monitoring-test/1.0.0'
                               }
@@ -121,6 +119,7 @@ jobs:
                                   print(f"Error: {response.text}")
                               print(f"Request URL: {url}")
                               print(f"Request headers: {response.request.headers}")
+                              print(f"Request body: {json.dumps(metric_data, indent=2)}")
                       except Exception as e:
                           print(f"Error sending metric: {e}")
                           exit(1)

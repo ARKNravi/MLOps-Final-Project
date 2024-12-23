@@ -192,24 +192,30 @@ def log_to_grafana(metric_name, value, labels=None):
     labels['job'] = 'mlops_training'
     
     try:
-        # Buat registry dan metrik dengan OpenMetrics format
-        registry = CollectorRegistry()
-        g = Gauge(metric_name, f'Metric {metric_name}', labelnames=labels.keys(), registry=registry)
-        g.labels(**labels).set(float(value))
+        timestamp_ms = int(time.time() * 1000)
         
-        # Generate dalam format OpenMetrics dan kompres
-        data = generate_openmetrics(registry)
-        compressed_data = snappy.compress(data)
+        # Format metrik sesuai dengan Grafana Cloud Prometheus API
+        metric_data = {
+            "series": [{
+                "labels": [
+                    {"name": "__name__", "value": metric_name}
+                ] + [
+                    {"name": k, "value": str(v)}
+                    for k, v in labels.items()
+                ],
+                "samples": [
+                    [timestamp_ms, str(float(value))]
+                ]
+            }]
+        }
         
         # Kirim ke Prometheus
         response = requests.post(
             os.environ.get('PROMETHEUS_REMOTE_WRITE_URL'),
-            data=compressed_data,
+            json=metric_data,
             auth=(os.environ.get('PROMETHEUS_USERNAME'), os.environ.get('PROMETHEUS_API_KEY')),
             headers={
-                'Content-Type': 'application/x-protobuf',
-                'Content-Encoding': 'snappy',
-                'X-Prometheus-Remote-Write-Version': '0.1.0',
+                'Content-Type': 'application/json',
                 'X-Scope-OrgID': os.environ.get('PROMETHEUS_USERNAME'),
                 'User-Agent': 'mlops-monitoring/1.0.0'
             }
