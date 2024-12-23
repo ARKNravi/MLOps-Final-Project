@@ -60,27 +60,44 @@ jobs:
                   PROMETHEUS_USERNAME: "1902030"
                   PROMETHEUS_REMOTE_WRITE_URL: ${{ secrets.PROMETHEUS_REMOTE_WRITE_URL }}
               run: |
-                  # Mengirim metrik test ke Prometheus
-                  curl -v -X POST "${PROMETHEUS_REMOTE_WRITE_URL}" \
-                    -u "${PROMETHEUS_USERNAME}:${PROMETHEUS_API_KEY}" \
-                    -H "Content-Type: application/x-protobuf" \
-                    -H "X-Prometheus-Remote-Write-Version: 0.1.0" \
-                    -H "X-Scope-OrgID: ${PROMETHEUS_USERNAME}" \
-                    --data-binary "@-" <<EOF
-                  {
-                    "metrics": [
-                      {
-                        "name": "test_metric",
-                        "value": 1.0,
-                        "timestamp": $(date +%s)000,
-                        "labels": {
-                          "environment": "github_actions",
-                          "test": "true"
-                        }
-                      }
-                    ]
-                  }
+                  # Install dependencies untuk remote write
+                  sudo apt-get update && sudo apt-get install -y python3-pip
+                  pip3 install prometheus-client requests
+
+                  # Buat script Python untuk mengirim metrik
+                  cat > send_metric.py << EOF
+                  import time
+                  from prometheus_client import CollectorRegistry, Gauge, push_to_gateway
+                  import os
+
+                  registry = CollectorRegistry()
+                  g = Gauge('test_metric', 'Test metric', registry=registry)
+                  g.set(1.0)
+
+                  url = os.environ['PROMETHEUS_REMOTE_WRITE_URL']
+                  username = os.environ['PROMETHEUS_USERNAME']
+                  password = os.environ['PROMETHEUS_API_KEY']
+
+                  push_to_gateway(
+                      url,
+                      job='github_actions_test',
+                      registry=registry,
+                      handler=lambda url, method, timeout, headers, data: requests.post(
+                          url,
+                          data=data,
+                          auth=(username, password),
+                          headers={
+                              'Content-Type': 'application/x-protobuf',
+                              'X-Prometheus-Remote-Write-Version': '0.1.0',
+                              'X-Scope-OrgID': username
+                          },
+                          timeout=timeout
+                      )
+                  )
                   EOF
+
+                  # Jalankan script
+                  python3 send_metric.py
 
             # Menambahkan langkah untuk memverifikasi pengiriman log
             - name: Test Loki Push

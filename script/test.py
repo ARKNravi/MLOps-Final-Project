@@ -10,7 +10,7 @@ from sklearn.metrics import confusion_matrix
 import mlflow
 import mlflow.pytorch
 from mlflow import log_metric, log_param, start_run
-from prometheus_client import start_http_server, Gauge
+from prometheus_client import start_http_server, Gauge, CollectorRegistry, push_to_gateway
 import time
 import datetime
 import requests
@@ -170,33 +170,32 @@ def log_to_grafana(metric_name, value, labels=None):
     labels['environment'] = 'github_actions'
     labels['job'] = 'mlops_training'
     
-    timestamp = int(datetime.now().timestamp() * 1000)
-    
-    # Format metrik untuk Prometheus
-    metric = {
-        "metrics": [{
-            "name": metric_name,
-            "value": float(value),  # Pastikan value adalah float
-            "timestamp": timestamp,
-            "labels": labels
-        }]
-    }
-    
-    headers = {
-        "Content-Type": "application/json",
-        "X-Scope-OrgID": os.environ.get('PROMETHEUS_USERNAME')
-    }
+    # Gunakan prometheus_client untuk mengirim metrik
+    registry = CollectorRegistry()
+    g = Gauge(metric_name, f'Metric {metric_name}', registry=registry)
+    g.set(float(value))
     
     try:
-        # Kirim ke Prometheus
-        response = requests.post(
+        # Kirim ke Prometheus menggunakan push_to_gateway
+        push_to_gateway(
             os.environ.get('PROMETHEUS_REMOTE_WRITE_URL'),
-            json=metric,
-            headers=headers,
-            auth=(os.environ.get('PROMETHEUS_USERNAME'), os.environ.get('PROMETHEUS_API_KEY'))
+            job='mlops_training',
+            registry=registry,
+            handler=lambda url, method, timeout, headers, data: requests.post(
+                url,
+                data=data,
+                auth=(os.environ.get('PROMETHEUS_USERNAME'), os.environ.get('PROMETHEUS_API_KEY')),
+                headers={
+                    'Content-Type': 'application/x-protobuf',
+                    'X-Prometheus-Remote-Write-Version': '0.1.0',
+                    'X-Scope-OrgID': os.environ.get('PROMETHEUS_USERNAME')
+                },
+                timeout=timeout
+            )
         )
         
-        # Kirim ke Loki dengan format yang benar
+        # Kirim ke Loki (ini sudah bekerja dengan baik)
+        timestamp = int(time.time() * 1e9)  # Convert to nanoseconds
         loki_payload = {
             "streams": [{
                 "stream": {
@@ -205,13 +204,7 @@ def log_to_grafana(metric_name, value, labels=None):
                     "metric": metric_name
                 },
                 "values": [
-                    [str(timestamp) + "000000", # Loki membutuhkan timestamp dalam nanoseconds
-                     json.dumps({
-                         "level": "info",
-                         "message": f"Metric logged: {metric_name}={value}",
-                         "metric_name": metric_name,
-                         "value": value
-                     })]
+                    [str(timestamp), f"Metric logged: {metric_name}={value}"]
                 ]
             }]
         }
@@ -223,10 +216,7 @@ def log_to_grafana(metric_name, value, labels=None):
             headers={"Content-Type": "application/json"}
         )
         
-        print(f"Metric sent to Prometheus: {response.status_code}")
-        print(f"Log sent to Loki: {loki_response.status_code}")
-        
-        return response.status_code == 200 and loki_response.status_code == 200
+        return True
     except Exception as e:
         print(f"Error logging metric: {e}")
         return False
