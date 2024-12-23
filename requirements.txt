@@ -21,3 +21,4 @@ requests==2.31.0
 colorama==0.4.5
 configobj==5.0.8
 --extra-index-url https://download.pytorch.org/whl/cpu
+python-snappy==0.6.1
