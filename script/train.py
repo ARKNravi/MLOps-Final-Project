@@ -22,9 +22,9 @@ import json
 MLFLOW_TRACKING_URI = "https://dagshub.com/salsazufar/project-akhir-mlops.mlflow"
 mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
 
-# Set MLflow credentials directly from environment variables
-mlflow.set_tracking_username(os.environ.get('DAGSHUB_USERNAME'))
-mlflow.set_tracking_password(os.environ.get('DAGSHUB_TOKEN'))
+# Set MLflow credentials through environment variables
+os.environ['MLFLOW_TRACKING_USERNAME'] = os.environ.get('DAGSHUB_USERNAME', '')
+os.environ['MLFLOW_TRACKING_PASSWORD'] = os.environ.get('DAGSHUB_TOKEN', '')
 
 # Print for debugging
 print(f"MLflow Tracking URI: {MLFLOW_TRACKING_URI}")
