@@ -188,26 +188,28 @@ def log_to_grafana(metric_name, value, labels=None):
         labels = {}
     
     # Tambahkan label wajib
-    labels['__name__'] = metric_name
     labels['environment'] = 'github_actions'
     labels['job'] = 'mlops_training'
     
     try:
-        timestamp_ms = int(time.time() * 1000)
+        # Buat registry dan metrik
+        registry = CollectorRegistry()
+        g = Gauge(metric_name, f'Metric {metric_name}', labelnames=labels.keys(), registry=registry)
+        g.labels(**labels).set(float(value))
         
-        # Format payload untuk Grafana Cloud
-        payload = [{
-            "stream": labels,
-            "values": [[str(timestamp_ms), str(float(value))]]
-        }]
+        # Generate Prometheus format dan kompres
+        data = generate_latest(registry)
+        compressed_data = snappy.compress(data)
         
         # Kirim ke Prometheus
         response = requests.post(
             os.environ.get('PROMETHEUS_REMOTE_WRITE_URL'),
-            json=payload,
+            data=compressed_data,
             auth=(os.environ.get('PROMETHEUS_USERNAME'), os.environ.get('PROMETHEUS_API_KEY')),
             headers={
-                'Content-Type': 'application/json',
+                'Content-Type': 'application/x-protobuf',
+                'Content-Encoding': 'snappy',
+                'X-Prometheus-Remote-Write-Version': '0.1.0',
                 'X-Scope-OrgID': os.environ.get('PROMETHEUS_USERNAME')
             }
         )

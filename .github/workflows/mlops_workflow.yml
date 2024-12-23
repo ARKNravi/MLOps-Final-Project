@@ -56,77 +56,73 @@ jobs:
             # Menambahkan langkah untuk memverifikasi pengiriman metrik
             - name: Test Metric Push
               env:
-                PROMETHEUS_API_KEY: ${{ secrets.PROMETHEUS_API_KEY }}
-                PROMETHEUS_REMOTE_WRITE_URL: ${{ secrets.PROMETHEUS_REMOTE_WRITE_URL }}
+                  PROMETHEUS_API_KEY: ${{ secrets.PROMETHEUS_API_KEY }}
+                  PROMETHEUS_USERNAME: "1902030"
+                  PROMETHEUS_REMOTE_WRITE_URL: ${{ secrets.PROMETHEUS_REMOTE_WRITE_URL }}
               run: |
-                # Install dependencies
-                sudo apt-get update && sudo apt-get install -y python3-pip
-                pip3 install prometheus-client requests protobuf python-snappy
-          
-                # Download and compile protobuf definitions
-                wget https://raw.githubusercontent.com/prometheus/prometheus/main/prometheus/prometheus.proto
-                protoc --python_out=. prometheus.proto
-          
-                # Create send_metric_correctly.py
-                cat > send_metric_correctly.py << EOF
-                import os
-                import time
-                import snappy
-                import requests
-                from prometheus_pb2 import WriteRequest, TimeSeries, LabelPair, Sample
-          
-                def create_write_request():
-                    write_request = WriteRequest()
-          
-                    # Define a single TimeSeries
-                    ts = write_request.timeseries.add()
-                    ts.labels.extend([
-                        LabelPair(name="__name__", value="test_metric"),
-                        LabelPair(name="job", value="github_actions_test"),
-                        LabelPair(name="instance", value="test"),
-                        LabelPair(name="environment", value="github_actions")
-                    ])
-          
-                    # Add a sample
-                    sample = ts.samples.add()
-                    sample.value = 1.0
-                    sample.timestamp = int(time.time() * 1000)  # Unix timestamp in milliseconds
-          
-                    return write_request
-          
-                def send_metrics():
-                    write_request = create_write_request()
-                    serialized = write_request.SerializeToString()
-                    compressed = snappy.compress(serialized)
-          
-                    remote_write_url = os.getenv('PROMETHEUS_REMOTE_WRITE_URL')
-                    api_key = os.getenv('PROMETHEUS_API_KEY')
-          
-                    headers = {
-                        'Content-Encoding': 'snappy',
-                        'Content-Type': 'application/x-protobuf',
-                        'X-Prometheus-Remote-Write-Version': '0.1.0',
-                        'Authorization': f'Bearer {api_key}'
-                    }
-          
-                    response = requests.post(
-                        remote_write_url,
-                        data=compressed,
-                        headers=headers
-                    )
-          
-                    print(f"Status code: {response.status_code}")
-                    if response.status_code in [200, 204]:
-                        print("✅ Metric sent successfully")
-                    else:
-                        print(f"❌ Failed to send metric. Response: {response.text}")
-          
-                if __name__ == "__main__":
-                    send_metrics()
-                EOF
-          
-                # Run the corrected script
-                python3 send_metric_correctly.py
+                  # Install dependencies
+                  sudo apt-get update && sudo apt-get install -y python3-pip
+                  pip3 install prometheus-client requests protobuf python-snappy
+
+                  # Buat script Python untuk mengirim metrik
+                  cat > send_metric.py << EOF
+                  import time
+                  import requests
+                  import snappy
+                  from prometheus_client import CollectorRegistry, Gauge, generate_latest
+                  from prometheus_client.parser import text_string_to_metric_families
+                  import os
+
+                  def send_metric():
+                      # Buat registry dan metrik
+                      registry = CollectorRegistry()
+                      g = Gauge('test_metric', 'Test metric', registry=registry)
+                      g.set(1.0)
+
+                      # Generate Prometheus format
+                      data = generate_latest(registry)
+                      
+                      # Kompres dengan snappy
+                      compressed_data = snappy.compress(data)
+
+                      url = os.environ['PROMETHEUS_REMOTE_WRITE_URL']
+                      username = os.environ['PROMETHEUS_USERNAME']
+                      password = os.environ['PROMETHEUS_API_KEY']
+
+                      try:
+                          response = requests.post(
+                              url,
+                              data=compressed_data,
+                              auth=(username, password),
+                              headers={
+                                  'Content-Type': 'application/x-protobuf',
+                                  'Content-Encoding': 'snappy',
+                                  'X-Prometheus-Remote-Write-Version': '0.1.0',
+                                  'X-Scope-OrgID': username
+                              }
+                          )
+                          
+                          print(f"Status code: {response.status_code}")
+                          print(f"Headers: {response.headers}")
+                          if response.text:
+                              print(f"Response: {response.text}")
+                          
+                          if response.status_code in [200, 204]:
+                              print("✅ Metric sent successfully")
+                          else:
+                              print("❌ Failed to send metric")
+                              if response.text:
+                                  print(f"Error: {response.text}")
+                      except Exception as e:
+                          print(f"Error sending metric: {e}")
+                          exit(1)
+
+                  if __name__ == "__main__":
+                      send_metric()
+                  EOF
+
+                  # Jalankan script
+                  python3 send_metric.py
 
             # Menambahkan langkah untuk memverifikasi pengiriman log
             - name: Test Loki Push
