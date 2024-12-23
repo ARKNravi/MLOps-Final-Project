@@ -1,5 +1,10 @@
+# prometheus.yml
+
+global:
     scrape_interval: 15s
     evaluation_interval: 15s
+
+scrape_configs:
     - job_name: "prometheus"
       static_configs:
           - targets: ["localhost:9090"]
@@ -7,6 +12,7 @@
     - job_name: "train"
       static_configs:
           - targets: ["train:8000"]
+
     - job_name: "loki"
       static_configs:
           - targets: ["loki:3100"]
