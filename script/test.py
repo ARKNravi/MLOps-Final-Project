@@ -192,30 +192,38 @@ def log_to_grafana(metric_name, value, labels=None):
     labels['job'] = 'mlops_training'
     
     try:
-        # Setup registry dan buat write request
-        registry = CollectorRegistry()
-        metric = create_write_request(metric_name, value, labels)
-        registry.register(metric)
+        # Buat timestamp dalam format yang benar
+        timestamp = int(time.time() * 1000)
         
-        # Generate dan kompres data
-        data = generate_latest(registry)
-        compressed_data = snappy.compress(data)
+        # Format data untuk Prometheus remote write
+        write_request = {
+            "timeseries": [{
+                "labels": [
+                    {"name": "__name__", "value": metric_name}
+                ] + [
+                    {"name": k, "value": str(v)}
+                    for k, v in labels.items()
+                ],
+                "samples": [
+                    {"timestamp": timestamp, "value": float(value)}
+                ]
+            }]
+        }
         
         # Kirim ke Prometheus
         response = requests.post(
             os.environ.get('PROMETHEUS_REMOTE_WRITE_URL'),
-            data=compressed_data,
+            json=write_request,
             auth=(os.environ.get('PROMETHEUS_USERNAME'), os.environ.get('PROMETHEUS_API_KEY')),
             headers={
-                'Content-Type': 'application/x-protobuf',
-                'Content-Encoding': 'snappy',
+                'Content-Type': 'application/json',
                 'X-Prometheus-Remote-Write-Version': '0.1.0',
                 'X-Scope-OrgID': os.environ.get('PROMETHEUS_USERNAME')
             }
         )
         
         # Kirim ke Loki
-        timestamp = int(time.time() * 1e9)
+        loki_timestamp = int(time.time() * 1e9)
         loki_payload = {
             "streams": [{
                 "stream": {
@@ -224,7 +232,7 @@ def log_to_grafana(metric_name, value, labels=None):
                     "metric": metric_name
                 },
                 "values": [
-                    [str(timestamp), f"Metric logged: {metric_name}={value}"]
+                    [str(loki_timestamp), f"Metric logged: {metric_name}={value}"]
                 ]
             }]
         }
@@ -239,7 +247,7 @@ def log_to_grafana(metric_name, value, labels=None):
         print(f"Prometheus response: {response.status_code}")
         print(f"Loki response: {loki_response.status_code}")
         
-        return response.status_code == 200 and loki_response.status_code == 204
+        return response.status_code in [200, 204] and loki_response.status_code == 204
     except Exception as e:
         print(f"Error logging metric: {e}")
         return False

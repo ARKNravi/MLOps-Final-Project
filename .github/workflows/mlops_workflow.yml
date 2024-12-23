@@ -63,63 +63,67 @@ jobs:
                   # Install dependencies
                   sudo apt-get update && sudo apt-get install -y python3-pip python3-dev
                   sudo apt-get install -y libsnappy-dev
-                  pip3 install prometheus-client requests python-snappy protobuf
+                  pip3 install prometheus-client requests python-snappy protobuf prometheus-api-client
 
                   # Buat script Python untuk mengirim metrik
                   cat > send_metric.py << EOF
                   import time
                   import requests
-                  from prometheus_client import CollectorRegistry, Gauge, generate_latest
-                  from prometheus_client.core import Sample, Metric
-                  from prometheus_client.samples import Exemplar
-                  import os
-                  import snappy
                   import struct
-                  from google.protobuf.timestamp_pb2 import Timestamp
+                  import snappy
+                  from prometheus_client import CollectorRegistry, Gauge, generate_latest
+                  import os
+                  from prometheus_api_client.utils import parse_datetime
+                  from datetime import datetime, timezone
 
-                  def create_write_request(registry):
-                      timestamp = Timestamp()
-                      timestamp.GetCurrentTime()
+                  def create_prometheus_write_request():
+                      # Buat timestamp dalam format yang benar
+                      timestamp = int(time.time() * 1000)
                       
-                      # Buat sampel metrik
-                      sample = Sample(
-                          name='test_metric',
-                          labels={'job': 'github_actions_test'},
-                          value=1.0,
-                          timestamp=int(time.time() * 1000)
-                      )
+                      # Buat series dengan label
+                      series = {
+                          "__name__": "test_metric",
+                          "job": "github_actions_test",
+                          "instance": "test",
+                          "environment": "github_actions"
+                      }
                       
-                      # Buat metrik
-                      metric = Metric('test_metric', 'Test metric', 'gauge')
-                      metric.samples = [sample]
+                      # Buat sample dengan timestamp dan value
+                      sample = {
+                          "timestamp": timestamp,
+                          "value": 1.0
+                      }
                       
-                      # Generate data dalam format protobuf
-                      data = generate_latest(registry)
+                      # Format data sesuai dengan Prometheus remote write format
+                      data = {
+                          "timeseries": [{
+                              "labels": [
+                                  {"name": k, "value": v}
+                                  for k, v in series.items()
+                              ],
+                              "samples": [
+                                  {"timestamp": sample["timestamp"], "value": sample["value"]}
+                              ]
+                          }]
+                      }
                       
-                      # Kompres menggunakan snappy
-                      compressed = snappy.compress(data)
-                      return compressed
-
-                  registry = CollectorRegistry()
-                  g = Gauge('test_metric', 'Test metric', registry=registry)
-                  g.set(1.0)
+                      return data
 
                   url = os.environ['PROMETHEUS_REMOTE_WRITE_URL']
                   username = os.environ['PROMETHEUS_USERNAME']
                   password = os.environ['PROMETHEUS_API_KEY']
 
                   try:
-                      # Generate dan kompres data
-                      write_request = create_write_request(registry)
+                      # Buat data dalam format Prometheus remote write
+                      write_request = create_prometheus_write_request()
                       
                       # Kirim ke Prometheus
                       response = requests.post(
                           url,
-                          data=write_request,
+                          json=write_request,
                           auth=(username, password),
                           headers={
-                              'Content-Type': 'application/x-protobuf',
-                              'Content-Encoding': 'snappy',
+                              'Content-Type': 'application/json',
                               'X-Prometheus-Remote-Write-Version': '0.1.0',
                               'X-Scope-OrgID': username
                           }
@@ -129,7 +133,7 @@ jobs:
                       if response.text:
                           print(f"Response: {response.text}")
                       
-                      if response.status_code == 200 or response.status_code == 204:
+                      if response.status_code in [200, 204]:
                           print("✅ Metric sent successfully")
                       else:
                           print("❌ Failed to send metric")
