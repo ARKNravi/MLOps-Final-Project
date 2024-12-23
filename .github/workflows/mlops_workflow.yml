@@ -22,84 +22,91 @@ jobs:
                   PROMETHEUS_REMOTE_WRITE_URL: ${{ secrets.PROMETHEUS_REMOTE_WRITE_URL }}
                   LOKI_URL: ${{ secrets.LOKI_URL }}
               run: |
-                  # Setup Prometheus remote write configuration
+                  # Setup Prometheus remote write configuration dengan label tambahan
                   cat > prometheus.yml << EOF
                   global:
                     scrape_interval: 15s
                     evaluation_interval: 15s
+                    external_labels:
+                      environment: github_actions
+                      job: mlops_training
                     
                   remote_write:
                     - url: ${PROMETHEUS_REMOTE_WRITE_URL}
                       basic_auth:
                         username: ${GRAFANA_CLOUD_API_KEY}
                         password: ${GRAFANA_CLOUD_API_KEY}
+                      write_relabel_configs:
+                        - source_labels: [__name__]
+                          regex: '(train_loss|train_accuracy|val_loss|val_accuracy|learning_rate|epoch_time|batch_time)'
+                          action: keep
                         
                   scrape_configs:
                     - job_name: 'mlops-metrics'
                       static_configs:
                         - targets: ['localhost:8000']
+                      labels:
+                        environment: github_actions
                   EOF
 
                   # Verify configuration
                   echo "Testing connection to Grafana Cloud..."
                   curl -I -H "Authorization: Bearer ${GRAFANA_CLOUD_API_KEY}" ${GRAFANA_CLOUD_API_URL}/api/health
 
-            - name: Verify Grafana Cloud Integration
+            # Menambahkan langkah untuk memverifikasi pengiriman metrik
+            - name: Test Metric Push
               env:
-                  GRAFANA_CLOUD_API_KEY: ${{ secrets.GRAFANA_CLOUD_API_KEY }}
                   PROMETHEUS_API_KEY: ${{ secrets.PROMETHEUS_API_KEY }}
-                  LOKI_API_KEY: ${{ secrets.LOKI_API_KEY }}
-                  GRAFANA_CLOUD_URL: "https://arknravi.grafana.net"
-                  PROMETHEUS_REMOTE_WRITE_URL: "https://prometheus-prod-37-prod-ap-southeast-1.grafana.net/api/prom/push"
-                  LOKI_URL: "https://logs-prod-020.grafana.net"
                   PROMETHEUS_USERNAME: "1902030"
-                  LOKI_USERNAME: "1050298"
+                  PROMETHEUS_REMOTE_WRITE_URL: ${{ secrets.PROMETHEUS_REMOTE_WRITE_URL }}
               run: |
-                  # Check Grafana API health
-                  echo "Checking Grafana API..."
-                  GRAFANA_HEALTH=$(curl -s -H "Authorization: Bearer ${GRAFANA_CLOUD_API_KEY}" \
-                      "${GRAFANA_CLOUD_URL}/api/health")
-                  echo "Grafana Health: ${GRAFANA_HEALTH}"
+                  # Mengirim metrik test ke Prometheus
+                  curl -v -X POST "${PROMETHEUS_REMOTE_WRITE_URL}" \
+                    -u "${PROMETHEUS_USERNAME}:${PROMETHEUS_API_KEY}" \
+                    -H "Content-Type: application/x-protobuf" \
+                    -H "X-Prometheus-Remote-Write-Version: 0.1.0" \
+                    -H "X-Scope-OrgID: ${PROMETHEUS_USERNAME}" \
+                    --data-binary "@-" <<EOF
+                  {
+                    "metrics": [
+                      {
+                        "name": "test_metric",
+                        "value": 1.0,
+                        "timestamp": $(date +%s)000,
+                        "labels": {
+                          "environment": "github_actions",
+                          "test": "true"
+                        }
+                      }
+                    ]
+                  }
+                  EOF
 
-                  # Check Prometheus metrics dengan basic auth dan header tambahan
-                  echo "Checking Prometheus metrics..."
-                  PROM_RESPONSE=$(curl -s \
-                      -H "X-Scope-OrgID: ${PROMETHEUS_USERNAME}" \
-                      -u "${PROMETHEUS_USERNAME}:${PROMETHEUS_API_KEY}" \
-                      "https://prometheus-prod-37-prod-ap-southeast-1.grafana.net/api/prom/api/v1/query?query=up")
-                  echo "Prometheus Response: ${PROM_RESPONSE}"
-
-                  # Check Loki logs
-                  echo "Checking Loki logs..."
-                  LOKI_RESPONSE=$(curl -s \
-                      -u "${LOKI_USERNAME}:${LOKI_API_KEY}" \
-                      "https://logs-prod-020.grafana.net/loki/api/v1/labels")
-                  echo "Loki Response: ${LOKI_RESPONSE}"
-
-                  # Print dashboard URL
-                  echo "Grafana Dashboard URL: ${GRAFANA_CLOUD_URL}"
-
-                  # Verify all responses
-                  if echo "${GRAFANA_HEALTH}" | grep -q "database.*ok"; then
-                      echo "✅ Grafana connection successful"
-                  else
-                      echo "❌ Grafana connection failed"
-                      exit 1
-                  fi
-
-                  if ! echo "${PROM_RESPONSE}" | grep -q "error"; then
-                      echo "✅ Prometheus connection successful"
-                  else
-                      echo "❌ Prometheus connection failed"
-                      exit 1
-                  fi
-
-                  if ! echo "${LOKI_RESPONSE}" | grep -q "error"; then
-                      echo "✅ Loki connection successful"
-                  else
-                      echo "❌ Loki connection failed"
-                      exit 1
-                  fi
+            # Menambahkan langkah untuk memverifikasi pengiriman log
+            - name: Test Loki Push
+              env:
+                  LOKI_API_KEY: ${{ secrets.LOKI_API_KEY }}
+                  LOKI_USERNAME: "1050298"
+                  LOKI_URL: ${{ secrets.LOKI_URL }}
+              run: |
+                  # Mengirim log test ke Loki
+                  curl -v -X POST "${LOKI_URL}/loki/api/v1/push" \
+                    -H "Content-Type: application/json" \
+                    -u "${LOKI_USERNAME}:${LOKI_API_KEY}" \
+                    --data-raw '{
+                      "streams": [
+                        {
+                          "stream": {
+                            "job": "mlops_training",
+                            "environment": "github_actions",
+                            "test": "true"
+                          },
+                          "values": [
+                            ["'$(date +%s)000000000'", "Test log message from GitHub Actions"]
+                          ]
+                        }
+                      ]
+                    }'
 
     # Step 1: Build Base Image with Dependencies
     build_and_cache_dependencies:

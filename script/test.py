@@ -14,6 +14,7 @@ from prometheus_client import start_http_server, Gauge
 import time
 import datetime
 import requests
+import json
 
 # MLflow Tracking URI
 MLFLOW_TRACKING_URI = "https://dagshub.com/salsazufar/project-akhir-mlops.mlflow"
@@ -160,6 +161,75 @@ def log_test_metrics_to_grafana(metrics_dict):
             print(f"Test metric logged: {metric_name}={value}")
         except Exception as e:
             print(f"Error logging test metric: {e}")
+
+def log_to_grafana(metric_name, value, labels=None):
+    if not labels:
+        labels = {}
+    
+    # Tambahkan label environment
+    labels['environment'] = 'github_actions'
+    labels['job'] = 'mlops_training'
+    
+    timestamp = int(datetime.now().timestamp() * 1000)
+    
+    # Format metrik untuk Prometheus
+    metric = {
+        "metrics": [{
+            "name": metric_name,
+            "value": float(value),  # Pastikan value adalah float
+            "timestamp": timestamp,
+            "labels": labels
+        }]
+    }
+    
+    headers = {
+        "Content-Type": "application/json",
+        "X-Scope-OrgID": os.environ.get('PROMETHEUS_USERNAME')
+    }
+    
+    try:
+        # Kirim ke Prometheus
+        response = requests.post(
+            os.environ.get('PROMETHEUS_REMOTE_WRITE_URL'),
+            json=metric,
+            headers=headers,
+            auth=(os.environ.get('PROMETHEUS_USERNAME'), os.environ.get('PROMETHEUS_API_KEY'))
+        )
+        
+        # Kirim ke Loki dengan format yang benar
+        loki_payload = {
+            "streams": [{
+                "stream": {
+                    "job": "mlops_training",
+                    "environment": "github_actions",
+                    "metric": metric_name
+                },
+                "values": [
+                    [str(timestamp) + "000000", # Loki membutuhkan timestamp dalam nanoseconds
+                     json.dumps({
+                         "level": "info",
+                         "message": f"Metric logged: {metric_name}={value}",
+                         "metric_name": metric_name,
+                         "value": value
+                     })]
+                ]
+            }]
+        }
+        
+        loki_response = requests.post(
+            f"{os.environ.get('LOKI_URL')}/loki/api/v1/push",
+            json=loki_payload,
+            auth=(os.environ.get('LOKI_USERNAME'), os.environ.get('LOKI_API_KEY')),
+            headers={"Content-Type": "application/json"}
+        )
+        
+        print(f"Metric sent to Prometheus: {response.status_code}")
+        print(f"Log sent to Loki: {loki_response.status_code}")
+        
+        return response.status_code == 200 and loki_response.status_code == 200
+    except Exception as e:
+        print(f"Error logging metric: {e}")
+        return False
 
 # Run the testing phase
 if __name__ == "__main__":
