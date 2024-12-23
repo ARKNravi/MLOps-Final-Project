@@ -139,16 +139,23 @@ def log_to_grafana(metric_name, value, labels=None):
     if not labels:
         labels = {}
     
-    # Add common labels
-    labels.update({
-        "job": "mlops-training",
-        "instance": "github-action",
-        "environment": "ci"
-    })
+    # Update Prometheus metrics
+    if metric_name == 'train_loss':
+        TRAIN_LOSS.set(value)
+    elif metric_name == 'train_accuracy':
+        TRAIN_ACC.set(value)
+    elif metric_name == 'val_loss':
+        VAL_LOSS.set(value)
+    elif metric_name == 'val_accuracy':
+        VAL_ACC.set(value)
+    elif metric_name == 'batch_loss':
+        # Add new Gauge for batch metrics
+        BATCH_LOSS = Gauge('batch_loss', 'Loss per batch')
+        BATCH_LOSS.set(value)
     
-    # Send to Prometheus
+    # Log to Grafana Cloud with more frequent updates
     timestamp = int(datetime.now().timestamp() * 1000)
-    prom_metric = {
+    metric = {
         "metrics": [{
             "name": metric_name,
             "value": value,
@@ -159,44 +166,42 @@ def log_to_grafana(metric_name, value, labels=None):
     
     try:
         # Send to Prometheus
-        prom_response = requests.post(
+        response = requests.post(
             os.environ.get('PROMETHEUS_REMOTE_WRITE_URL'),
-            json=prom_metric,
+            json=metric,
             headers={"Content-Type": "application/json"},
             auth=(os.environ.get('PROMETHEUS_USERNAME'), os.environ.get('PROMETHEUS_API_KEY'))
         )
         
-        # Send to Loki with structured logging
+        # Send to Loki for logging
+        log_message = {
+            "level": "info",
+            "message": f"Metric logged: {metric_name}={value}",
+            "metric_name": metric_name,
+            "value": value,
+            "timestamp": timestamp
+        }
+        
         loki_payload = {
             "streams": [{
                 "stream": {
                     "job": "mlops-training",
-                    "instance": "github-action",
-                    "environment": "ci",
                     "level": "info"
                 },
-                "values": [[
-                    str(timestamp * 1000000), # Loki expects nanoseconds
-                    json.dumps({
-                        "metric": metric_name,
-                        "value": value,
-                        "labels": labels,
-                        "message": f"Metric logged: {metric_name}={value}"
-                    })
-                ]]
+                "values": [[str(timestamp), json.dumps(log_message)]]
             }]
         }
         
-        loki_response = requests.post(
+        requests.post(
             f"{os.environ.get('LOKI_URL')}/loki/api/v1/push",
             json=loki_payload,
             auth=(os.environ.get('LOKI_USERNAME'), os.environ.get('LOKI_API_KEY'))
         )
         
-        print(f"Metrics sent - Prometheus: {prom_response.status_code}, Loki: {loki_response.status_code}")
+        print(f"Metric sent: {metric_name}={value}")
         return True
     except Exception as e:
-        print(f"Error sending metrics: {e}")
+        print(f"Error logging metric: {e}")
         return False
 
 # Training function
