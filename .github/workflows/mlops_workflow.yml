@@ -62,14 +62,15 @@ jobs:
               run: |
                   # Install dependencies untuk remote write
                   sudo apt-get update && sudo apt-get install -y python3-pip
-                  pip3 install prometheus-client requests
+                  pip3 install prometheus-client requests snappy
 
                   # Buat script Python untuk mengirim metrik
                   cat > send_metric.py << EOF
                   import time
                   import requests
-                  from prometheus_client import CollectorRegistry, Gauge, push_to_gateway
+                  from prometheus_client import CollectorRegistry, Gauge, generate_latest
                   import os
+                  import snappy
 
                   registry = CollectorRegistry()
                   g = Gauge('test_metric', 'Test metric', registry=registry)
@@ -80,13 +81,20 @@ jobs:
                   password = os.environ['PROMETHEUS_API_KEY']
 
                   try:
-                      # Kirim metrik langsung menggunakan requests
+                      # Generate metrik dalam format yang benar
+                      metric_data = generate_latest(registry)
+                      
+                      # Kompres data menggunakan snappy
+                      compressed_data = snappy.compress(metric_data)
+                      
+                      # Kirim metrik
                       response = requests.post(
                           url,
-                          data=registry,
+                          data=compressed_data,
                           auth=(username, password),
                           headers={
                               'Content-Type': 'application/x-protobuf',
+                              'Content-Encoding': 'snappy',
                               'X-Prometheus-Remote-Write-Version': '0.1.0',
                               'X-Scope-OrgID': username
                           }
