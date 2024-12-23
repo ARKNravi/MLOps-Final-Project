@@ -16,6 +16,7 @@ import requests
 from datetime import datetime, timezone
 import snappy as python_snappy
 from remote_write_pb2 import WriteRequest, TimeSeries, Label, Sample
+import time
 
 # MLflow configuration
 MLFLOW_TRACKING_URI = "https://dagshub.com/salsazufar/project-akhir-mlops.mlflow"
@@ -133,75 +134,6 @@ GPU_MEMORY = Gauge('gpu_memory_usage', 'GPU memory usage in MB')
 
 # Start Prometheus metrics server
 start_http_server(8000)
-
-def log_to_grafana(metric_name, value, labels=None):
-    if not labels:
-        labels = {}
-    
-    # Update Prometheus metrics
-    if metric_name == 'train_loss':
-        TRAIN_LOSS.set(value)
-    elif metric_name == 'train_accuracy':
-        TRAIN_ACC.set(value)
-    elif metric_name == 'val_loss':
-        VAL_LOSS.set(value)
-    elif metric_name == 'val_accuracy':
-        VAL_ACC.set(value)
-    
-    # Log to Grafana Cloud
-    timestamp = int(datetime.now().timestamp() * 1000)
-    metric = {
-        "metrics": [{
-            "name": metric_name,
-            "value": value,
-            "timestamp": timestamp,
-            "labels": labels
-        }]
-    }
-    
-    headers = {
-        "Authorization": f"Bearer {os.environ.get('PROMETHEUS_API_KEY')}",
-        "Content-Type": "application/json"
-    }
-    
-    try:
-        response = requests.post(
-            os.environ.get('PROMETHEUS_REMOTE_WRITE_URL'),
-            json=metric,
-            headers=headers,
-            auth=(os.environ.get('PROMETHEUS_USERNAME'), os.environ.get('PROMETHEUS_API_KEY'))
-        )
-        
-        # Send to Loki
-        log_message = {
-            "level": "info",
-            "message": f"Metric logged: {metric_name}={value}",
-            "metric_name": metric_name,
-            "value": value,
-            "timestamp": timestamp
-        }
-        
-        loki_payload = {
-            "streams": [{
-                "stream": {
-                    "job": "mlops-training",
-                    "level": "info"
-                },
-                "values": [[str(timestamp), json.dumps(log_message)]]
-            }]
-        }
-        
-        loki_response = requests.post(
-            f"{os.environ.get('LOKI_URL')}/loki/api/v1/push",
-            json=loki_payload,
-            auth=(os.environ.get('LOKI_USERNAME'), os.environ.get('LOKI_API_KEY'))
-        )
-        print(f"Log sent to Loki: {log_message}")
-        
-        return response.status_code == 200
-    except Exception as e:
-        print(f"Error logging metric: {e}")
-        return False
 
 def send_metric_to_prometheus(metric_name, value, job="mlops_training"):
     timestamp_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
@@ -351,8 +283,6 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs):
 
             # Log epoch time
             epoch_time = time.time() - epoch_start_time
-            EPOCH_TIME.set(epoch_time)
-            log_to_grafana("epoch_time", epoch_time, {"epoch": str(epoch)})
             mlflow.log_metric("epoch_time", epoch_time, step=epoch)
 
             if phase == 'train':
