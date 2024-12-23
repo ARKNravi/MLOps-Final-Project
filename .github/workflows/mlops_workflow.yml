@@ -169,6 +169,12 @@ jobs:
                   SUPABASE_S3_SECRET_ACCESS_KEY: ${{ secrets.SUPABASE_S3_SECRET_ACCESS_KEY }}
                   DAGSHUB_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
                   DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
+                  PROMETHEUS_API_KEY: ${{ secrets.PROMETHEUS_API_KEY }}
+                  LOKI_API_KEY: ${{ secrets.LOKI_API_KEY }}
+                  PROMETHEUS_USERNAME: "1902030"
+                  LOKI_USERNAME: "1050298"
+                  PROMETHEUS_REMOTE_WRITE_URL: "https://prometheus-prod-37-prod-ap-southeast-1.grafana.net/api/prom/push"
+                  LOKI_URL: "https://logs-prod-020.grafana.net"
               run: |
                   # Pull the Docker dependency image with retry mechanism
                   n=0
@@ -188,47 +194,17 @@ jobs:
                       -e SUPABASE_S3_SECRET_ACCESS_KEY="$SUPABASE_S3_SECRET_ACCESS_KEY" \
                       -e DAGSHUB_USERNAME="$DAGSHUB_USERNAME" \
                       -e DAGSHUB_TOKEN="$DAGSHUB_TOKEN" \
+                      -e PROMETHEUS_API_KEY="$PROMETHEUS_API_KEY" \
+                      -e LOKI_API_KEY="$LOKI_API_KEY" \
+                      -e PROMETHEUS_USERNAME="$PROMETHEUS_USERNAME" \
+                      -e LOKI_USERNAME="$LOKI_USERNAME" \
+                      -e PROMETHEUS_REMOTE_WRITE_URL="$PROMETHEUS_REMOTE_WRITE_URL" \
+                      -e LOKI_URL="$LOKI_URL" \
                       -e MLFLOW_TRACKING_URI="http://localhost:5000" \
                       -v ${{ github.workspace }}:/app -w /app ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest bash -c "
+                        chmod +x ./wait-for-it.sh &&
                         echo 'Starting training...' &&
-                        echo 'Environment Variables in Container:' &&
-                        echo 'DAGSHUB_USERNAME: $DAGSHUB_USERNAME' &&
-                        echo 'DAGSHUB_TOKEN: $DAGSHUB_TOKEN' &&
-                        echo 'SUPABASE_S3_ENDPOINT: $SUPABASE_S3_ENDPOINT' &&
-                        echo 'SUPABASE_S3_REGION: $SUPABASE_S3_REGION' &&
-                        echo 'SUPABASE_S3_ACCESS_KEY_ID: $SUPABASE_S3_ACCESS_KEY_ID' &&
-                        echo 'SUPABASE_S3_SECRET_ACCESS_KEY: $SUPABASE_S3_SECRET_ACCESS_KEY' &&
-
-                        # Git configuration
-                        git config --global user.email 'actions@github.com' &&
-                        git config --global user.name 'GitHub Actions' &&
-                        
-                        # Stop tracking dataset and model folders with Git
-                        git rm -r --cached dataset || true &&
-                        git rm -r --cached model || true &&
-                        git commit -m 'Stop tracking dataset and model' --allow-empty &&
-                        
-                        # DVC setup and configuration
-                        dvc remote add -d supabase-s3 s3://MLOps --force &&
-                        dvc remote modify supabase-s3 endpointurl '$SUPABASE_S3_ENDPOINT' &&
-                        dvc remote modify supabase-s3 region '$SUPABASE_S3_REGION' &&
-                        dvc remote modify supabase-s3 access_key_id '$SUPABASE_S3_ACCESS_KEY_ID' &&
-                        dvc remote modify supabase-s3 secret_access_key '$SUPABASE_S3_SECRET_ACCESS_KEY' &&
-                        
-                        # Pull the dataset from the DVC remote
-                        dvc pull &&
-                        
-                        # Check dataset directory for debugging
-                        echo 'Contents of dataset/train directory:' &&
-                        ls /app/dataset/train &&
-                        
-                        # Run the training script
                         python script/train.py &&
-                        
-                        # Push updated model and dataset changes back to DVC remote
-                        dvc push &&
-
-                        # Run the test script
                         python script/test.py
                       "
 

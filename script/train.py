@@ -14,6 +14,9 @@ import mlflow
 import mlflow.pytorch
 import requests
 from datetime import datetime
+from prometheus_client import start_http_server, Gauge
+import time
+import json
 
 # MLflow Tracking URI
 MLFLOW_TRACKING_URI = "https://dagshub.com/salsazufar/project-akhir-mlops.mlflow"
@@ -104,14 +107,35 @@ def log_confusion_matrix(model, dataloader, class_names):
     # Log the confusion matrix image as an artifact in MLflow
     mlflow.log_artifact(confusion_matrix_path)
 
-# Add Grafana Cloud logging
+# Add Prometheus metrics
+TRAIN_LOSS = Gauge('train_loss', 'Training loss')
+TRAIN_ACC = Gauge('train_accuracy', 'Training accuracy')
+VAL_LOSS = Gauge('val_loss', 'Validation loss')
+VAL_ACC = Gauge('val_accuracy', 'Validation accuracy')
+LEARNING_RATE = Gauge('learning_rate', 'Current learning rate')
+EPOCH_TIME = Gauge('epoch_time', 'Time per epoch in seconds')
+BATCH_TIME = Gauge('batch_time', 'Time per batch in seconds')
+GPU_MEMORY = Gauge('gpu_memory_usage', 'GPU memory usage in MB')
+
+# Start Prometheus metrics server
+start_http_server(8000)
+
 def log_to_grafana(metric_name, value, labels=None):
     if not labels:
         labels = {}
     
-    timestamp = int(datetime.now().timestamp() * 1000)
+    # Update both Prometheus and Grafana
+    if metric_name == 'train_loss':
+        TRAIN_LOSS.set(value)
+    elif metric_name == 'train_accuracy':
+        TRAIN_ACC.set(value)
+    elif metric_name == 'val_loss':
+        VAL_LOSS.set(value)
+    elif metric_name == 'val_accuracy':
+        VAL_ACC.set(value)
     
-    # Prometheus metric format
+    # Log to Grafana Cloud
+    timestamp = int(datetime.now().timestamp() * 1000)
     metric = {
         "metrics": [{
             "name": metric_name,
@@ -122,7 +146,7 @@ def log_to_grafana(metric_name, value, labels=None):
     }
     
     headers = {
-        "Authorization": f"Bearer {os.getenv('GRAFANA_CLOUD_API_KEY')}",
+        "Authorization": f"Bearer {os.getenv('PROMETHEUS_API_KEY')}",
         "Content-Type": "application/json"
     }
     
@@ -130,9 +154,35 @@ def log_to_grafana(metric_name, value, labels=None):
         response = requests.post(
             os.getenv('PROMETHEUS_REMOTE_WRITE_URL'),
             json=metric,
-            headers=headers
+            headers=headers,
+            auth=(os.getenv('PROMETHEUS_USERNAME'), os.getenv('PROMETHEUS_API_KEY'))
         )
-        print(f"Metric logged: {metric_name}={value}")
+        log_message = {
+            "level": "info",
+            "message": f"Metric logged: {metric_name}={value}",
+            "metric_name": metric_name,
+            "value": value,
+            "timestamp": timestamp
+        }
+        
+        # Send to Loki
+        loki_payload = {
+            "streams": [{
+                "stream": {
+                    "job": "mlops-training",
+                    "level": "info"
+                },
+                "values": [[str(timestamp), json.dumps(log_message)]]
+            }]
+        }
+        
+        loki_response = requests.post(
+            f"{os.getenv('LOKI_URL')}/loki/api/v1/push",
+            json=loki_payload,
+            auth=(os.getenv('LOKI_USERNAME'), os.getenv('LOKI_API_KEY'))
+        )
+        print(f"Log sent to Loki: {log_message}")
+        
         return response.status_code == 200
     except Exception as e:
         print(f"Error logging metric: {e}")
@@ -153,14 +203,13 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs):
         mlflow.log_param("num_epochs", num_epochs)
 
         for epoch in range(num_epochs):
-            print(f'Epoch {epoch}/{num_epochs - 1}')
-            print('-' * 10)
-
+            epoch_start_time = time.time()
+            
             for phase in ['train', 'val']:
-                model.train() if phase == 'train' else model.eval()
-                running_loss, running_corrects = 0.0, 0
-
-                for inputs, labels in dataloaders[phase]:
+                batch_times = []
+                for batch_idx, (inputs, labels) in enumerate(dataloaders[phase]):
+                    batch_start_time = time.time()
+                    
                     inputs, labels = inputs.to(device), labels.to(device)
                     optimizer.zero_grad()
 
@@ -175,15 +224,21 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs):
                     running_loss += loss.item() * inputs.size(0)
                     running_corrects += torch.sum(preds == labels.data)
 
-                if phase == 'train':
-                    scheduler.step()
-
+                    # Log batch time
+                    batch_time = time.time() - batch_start_time
+                    batch_times.append(batch_time)
+                    BATCH_TIME.set(batch_time)
+                    
+                    # Log GPU memory if available
+                    if torch.cuda.is_available():
+                        memory_allocated = torch.cuda.memory_allocated() / 1024 / 1024  # Convert to MB
+                        GPU_MEMORY.set(memory_allocated)
+                
+                # Calculate and log metrics
                 epoch_loss = running_loss / dataset_sizes[phase]
                 epoch_acc = running_corrects.double() / dataset_sizes[phase]
-
-                print(f'{phase} Loss: {epoch_loss:.4f} Acc: {epoch_acc:.4f}')
-
-                # Log to Grafana Cloud
+                
+                # Log metrics
                 log_to_grafana(f"{phase}_loss", epoch_loss, {
                     "epoch": str(epoch),
                     "phase": phase
@@ -192,11 +247,30 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs):
                     "epoch": str(epoch),
                     "phase": phase
                 })
+                
+                # Log learning rate
+                if phase == 'train':
+                    current_lr = optimizer.param_groups[0]['lr']
+                    LEARNING_RATE.set(current_lr)
+                    log_to_grafana("learning_rate", current_lr, {"epoch": str(epoch)})
+            
+            # Log epoch time
+            epoch_time = time.time() - epoch_start_time
+            EPOCH_TIME.set(epoch_time)
+            log_to_grafana("epoch_time", epoch_time, {"epoch": str(epoch)})
 
-                # Save best model weights
-                if phase == 'val' and epoch_acc > best_acc:
-                    best_acc = epoch_acc
-                    best_model_wts = copy.deepcopy(model.state_dict())
+            if phase == 'train':
+                scheduler.step()
+
+            epoch_loss = running_loss / dataset_sizes[phase]
+            epoch_acc = running_corrects.double() / dataset_sizes[phase]
+
+            print(f'{phase} Loss: {epoch_loss:.4f} Acc: {epoch_acc:.4f}')
+
+            # Save best model weights
+            if phase == 'val' and epoch_acc > best_acc:
+                best_acc = epoch_acc
+                best_model_wts = copy.deepcopy(model.state_dict())
 
         # Save the best model
         model.load_state_dict(best_model_wts)
