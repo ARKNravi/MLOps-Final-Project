@@ -32,7 +32,7 @@ momentum = 0.9
 scheduler_step_size = 7
 scheduler_gamma = 0.1
 num_classes = 4
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+device = torch.device("cpu")
 
 # Accuracy threshold for model registry
 accuracy_threshold = 0.8  

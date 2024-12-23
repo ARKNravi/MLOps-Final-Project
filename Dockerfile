@@ -15,9 +15,8 @@ WORKDIR /app
 # Copy requirements file
 COPY requirements.txt .
 
-# Install Python dependencies with specific flags to avoid resolver issues
-RUN pip install --no-cache-dir --no-deps -r requirements.txt && \
-    pip install --no-cache-dir colorama==0.4.5 configobj==5.0.8
+# Install Python dependencies with specific flags
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the rest of the application
 COPY . .
