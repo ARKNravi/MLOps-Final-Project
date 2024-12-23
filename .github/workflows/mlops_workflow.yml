@@ -62,7 +62,7 @@ jobs:
               run: |
                   # Install dependencies
                   sudo apt-get update && sudo apt-get install -y python3-pip
-                  pip3 install prometheus-client requests
+                  pip3 install prometheus-client requests snappy prometheus-remote-write-py
 
                   # Buat script Python untuk mengirim metrik
                   cat > send_metric.py << EOF
