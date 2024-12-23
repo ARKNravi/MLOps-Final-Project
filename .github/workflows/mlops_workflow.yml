@@ -56,63 +56,32 @@ jobs:
             # Menambahkan langkah untuk memverifikasi pengiriman metrik
             - name: Test Metric Push
               env:
-                  PROMETHEUS_API_KEY: ${{ secrets.PROMETHEUS_API_KEY }}
-                  PROMETHEUS_USERNAME: "1902030"
-                  PROMETHEUS_REMOTE_WRITE_URL: ${{ secrets.PROMETHEUS_REMOTE_WRITE_URL }}
+                  PROMETHEUS_PUSHGATEWAY_URL: ${{ secrets.PROMETHEUS_PUSHGATEWAY_URL }}
               run: |
                   # Install dependencies
                   sudo apt-get update && sudo apt-get install -y python3-pip
-                  pip3 install prometheus-client requests protobuf python-snappy
+                  pip3 install prometheus-client requests
 
                   # Buat script Python untuk mengirim metrik
                   cat > send_metric.py << EOF
-                  import time
-                  import requests
-                  import snappy
-                  from prometheus_client import CollectorRegistry, Gauge, generate_latest
-                  from prometheus_client.parser import text_string_to_metric_families
+                  from prometheus_client import CollectorRegistry, Gauge, push_to_gateway
                   import os
 
                   def send_metric():
-                      # Buat registry dan metrik
                       registry = CollectorRegistry()
                       g = Gauge('test_metric', 'Test metric', registry=registry)
                       g.set(1.0)
 
-                      # Generate Prometheus format
-                      data = generate_latest(registry)
-                      
-                      # Kompres dengan snappy
-                      compressed_data = snappy.compress(data)
-
-                      url = os.environ['PROMETHEUS_REMOTE_WRITE_URL']
-                      username = os.environ['PROMETHEUS_USERNAME']
-                      password = os.environ['PROMETHEUS_API_KEY']
+                      url = os.environ['PROMETHEUS_PUSHGATEWAY_URL']
 
                       try:
-                          response = requests.post(
+                          # Kirim metrik ke Prometheus Pushgateway
+                          push_to_gateway(
                               url,
-                              data=compressed_data,
-                              auth=(username, password),
-                              headers={
-                                  'Content-Type': 'application/x-protobuf',
-                                  'Content-Encoding': 'snappy',
-                                  'X-Prometheus-Remote-Write-Version': '0.1.0',
-                                  'X-Scope-OrgID': username
-                              }
+                              job='github_actions_test',
+                              registry=registry
                           )
-                          
-                          print(f"Status code: {response.status_code}")
-                          print(f"Headers: {response.headers}")
-                          if response.text:
-                              print(f"Response: {response.text}")
-                          
-                          if response.status_code in [200, 204]:
-                              print("✅ Metric sent successfully")
-                          else:
-                              print("❌ Failed to send metric")
-                              if response.text:
-                                  print(f"Error: {response.text}")
+                          print("✅ Metric sent successfully")
                       except Exception as e:
                           print(f"Error sending metric: {e}")
                           exit(1)

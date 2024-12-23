@@ -197,49 +197,15 @@ def log_to_grafana(metric_name, value, labels=None):
         g = Gauge(metric_name, f'Metric {metric_name}', labelnames=labels.keys(), registry=registry)
         g.labels(**labels).set(float(value))
         
-        # Generate Prometheus format dan kompres
-        data = generate_latest(registry)
-        compressed_data = snappy.compress(data)
-        
-        # Kirim ke Prometheus
-        response = requests.post(
-            os.environ.get('PROMETHEUS_REMOTE_WRITE_URL'),
-            data=compressed_data,
-            auth=(os.environ.get('PROMETHEUS_USERNAME'), os.environ.get('PROMETHEUS_API_KEY')),
-            headers={
-                'Content-Type': 'application/x-protobuf',
-                'Content-Encoding': 'snappy',
-                'X-Prometheus-Remote-Write-Version': '0.1.0',
-                'X-Scope-OrgID': os.environ.get('PROMETHEUS_USERNAME')
-            }
+        # Kirim ke Prometheus Pushgateway
+        push_to_gateway(
+            os.environ.get('PROMETHEUS_PUSHGATEWAY_URL'),
+            job='mlops_training',
+            registry=registry
         )
         
-        # Kirim ke Loki
-        loki_timestamp = int(time.time() * 1e9)
-        loki_payload = {
-            "streams": [{
-                "stream": {
-                    "job": "mlops_training",
-                    "environment": "github_actions",
-                    "metric": metric_name
-                },
-                "values": [
-                    [str(loki_timestamp), f"Metric logged: {metric_name}={value}"]
-                ]
-            }]
-        }
-        
-        loki_response = requests.post(
-            f"{os.environ.get('LOKI_URL')}/loki/api/v1/push",
-            json=loki_payload,
-            auth=(os.environ.get('LOKI_USERNAME'), os.environ.get('LOKI_API_KEY')),
-            headers={"Content-Type": "application/json"}
-        )
-        
-        print(f"Prometheus response: {response.status_code}")
-        print(f"Loki response: {loki_response.status_code}")
-        
-        return response.status_code in [200, 204] and loki_response.status_code == 204
+        print(f"Metric {metric_name} sent successfully")
+        return True
     except Exception as e:
         print(f"Error logging metric: {e}")
         return False
