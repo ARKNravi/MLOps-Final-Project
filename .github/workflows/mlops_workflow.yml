@@ -201,9 +201,16 @@ jobs:
                       -e PROMETHEUS_REMOTE_WRITE_URL="$PROMETHEUS_REMOTE_WRITE_URL" \
                       -e LOKI_URL="$LOKI_URL" \
                       -e MLFLOW_TRACKING_URI="http://localhost:5000" \
-                      -v ${{ github.workspace }}:/app -w /app ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest bash -c "
-                        chmod +x ./wait-for-it.sh &&
+                      -v ${{ github.workspace }}:/app \
+                      -w /app \
+                      --network host \
+                      ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest \
+                      /bin/bash -c "
                         echo 'Starting training...' &&
+                        # Wait for MLflow
+                        echo 'Waiting for MLflow...' &&
+                        timeout 30 bash -c 'until curl -s http://localhost:5000 > /dev/null; do sleep 1; done' &&
+                        # Run training and testing
                         python script/train.py &&
                         python script/test.py
                       "
