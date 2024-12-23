@@ -122,19 +122,6 @@ def log_confusion_matrix(model, dataloader, class_names):
     # Log the confusion matrix image as an artifact in MLflow
     mlflow.log_artifact(confusion_matrix_path)
 
-# Add Prometheus metrics
-TRAIN_LOSS = Gauge('train_loss', 'Training loss')
-TRAIN_ACC = Gauge('train_accuracy', 'Training accuracy')
-VAL_LOSS = Gauge('val_loss', 'Validation loss')
-VAL_ACC = Gauge('val_accuracy', 'Validation accuracy')
-LEARNING_RATE = Gauge('learning_rate', 'Current learning rate')
-EPOCH_TIME = Gauge('epoch_time', 'Time per epoch in seconds')
-BATCH_TIME = Gauge('batch_time', 'Time per batch in seconds')
-GPU_MEMORY = Gauge('gpu_memory_usage', 'GPU memory usage in MB')
-
-# Start Prometheus metrics server
-start_http_server(8000)
-
 def send_metric_to_prometheus(metric_name, value, job="mlops_training"):
     timestamp_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
     
@@ -221,18 +208,17 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs):
                 print(f"\n{phase} phase:")
 
                 for batch_idx, (inputs, labels) in enumerate(dataloaders[phase]):
-                    if batch_idx % 10 == 0:  # Print every 10 batches
-                        print(f'Batch {batch_idx}/{total_batches}', end='\r')
-                        
                     batch_start_time = time.time()
-                    
-                    inputs, labels = inputs.to(device), labels.to(device)
+                    inputs = inputs.to(device)
+                    labels = labels.to(device)
+
                     optimizer.zero_grad()
 
                     with torch.set_grad_enabled(phase == 'train'):
                         outputs = model(inputs)
                         _, preds = torch.max(outputs, 1)
                         loss = criterion(outputs, labels)
+
                         if phase == 'train':
                             loss.backward()
                             optimizer.step()
@@ -240,42 +226,42 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs):
                     running_loss += loss.item() * inputs.size(0)
                     running_corrects += torch.sum(preds == labels.data)
 
-                    # Log batch metrics
+                    # Calculate and log batch metrics
                     batch_time = time.time() - batch_start_time
                     batch_times.append(batch_time)
-                    BATCH_TIME.set(batch_time)
+                    send_metric_to_prometheus("batch_time", batch_time)
                     
                     if batch_idx % 10 == 0:  # Log every 10 batches
-                        current_loss = loss.item()
-                        print(f"\nBatch {batch_idx}/{total_batches} - Loss: {current_loss:.4f}")
-                
-                # Calculate and log metrics
+                        batch_loss = loss.item()
+                        batch_acc = torch.sum(preds == labels.data).double() / inputs.size(0)
+                        
+                        if phase == 'train':
+                            send_metric_to_prometheus("train_loss", batch_loss)
+                            send_metric_to_prometheus("train_accuracy", batch_acc)
+                        else:
+                            send_metric_to_prometheus("val_loss", batch_loss)
+                            send_metric_to_prometheus("val_accuracy", batch_acc)
+
                 epoch_loss = running_loss / dataset_sizes[phase]
                 epoch_acc = running_corrects.double() / dataset_sizes[phase]
-                
+
                 print(f'{phase} Loss: {epoch_loss:.4f} Acc: {epoch_acc:.4f}')
 
-                # Log metrics to MLflow
-                mlflow.log_metric(f"{phase}_loss", epoch_loss, step=epoch)
-                mlflow.log_metric(f"{phase}_accuracy", epoch_acc.item(), step=epoch)
-                
-                # Log metrics to Grafana
-                log_to_grafana(f"{phase}_loss", epoch_loss, {
-                    "epoch": str(epoch),
-                    "phase": phase
-                })
-                log_to_grafana(f"{phase}_accuracy", epoch_acc.item(), {
-                    "epoch": str(epoch),
-                    "phase": phase
-                })
-                
-                # Log learning rate
+                # Log metrics for the epoch
                 if phase == 'train':
                     current_lr = optimizer.param_groups[0]['lr']
-                    LEARNING_RATE.set(current_lr)
-                    log_to_grafana("learning_rate", current_lr, {"epoch": str(epoch)})
+                    send_metric_to_prometheus("learning_rate", current_lr)
+                    send_metric_to_prometheus("train_loss", epoch_loss)
+                    send_metric_to_prometheus("train_accuracy", epoch_acc)
+                    mlflow.log_metric("train_loss", epoch_loss, step=epoch)
+                    mlflow.log_metric("train_accuracy", epoch_acc, step=epoch)
                     mlflow.log_metric("learning_rate", current_lr, step=epoch)
-            
+                else:
+                    send_metric_to_prometheus("val_loss", epoch_loss)
+                    send_metric_to_prometheus("val_accuracy", epoch_acc)
+                    mlflow.log_metric("val_loss", epoch_loss, step=epoch)
+                    mlflow.log_metric("val_accuracy", epoch_acc, step=epoch)
+
                 # Save best model weights
                 if phase == 'val' and epoch_acc > best_acc:
                     best_acc = epoch_acc
@@ -283,17 +269,11 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs):
 
             # Log epoch time
             epoch_time = time.time() - epoch_start_time
+            send_metric_to_prometheus("epoch_time", epoch_time)
             mlflow.log_metric("epoch_time", epoch_time, step=epoch)
 
             if phase == 'train':
                 scheduler.step()
-
-            # Send metrics to Prometheus
-            send_metric_to_prometheus("train_loss", epoch_loss)
-            send_metric_to_prometheus("train_accuracy", epoch_acc)
-            send_metric_to_prometheus("val_loss", epoch_loss)
-            send_metric_to_prometheus("val_accuracy", epoch_acc)
-            send_metric_to_prometheus("epoch_time", epoch_time)
 
         # Save the best model
         model.load_state_dict(best_model_wts)
