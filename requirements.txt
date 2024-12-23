@@ -1,21 +1,22 @@
-numpy
-torch
-torchvision
-tensorboardX
-pillow
-matplotlib
+numpy==1.24.3
+torch==2.0.1
+torchvision==0.15.2
+tensorboardX==2.6.2
+pillow==10.0.0
+matplotlib==3.7.2
 mlflow==2.17.2
-grafana-client
-torchsummary
-dvc[s3]
-distro
-cycler
-contourpy
-boto3          # Updated version
-s3transfer      # Updated version
-botocore       # Updated version
-six
-python-dateutil
-prometheus_client
-seaborn
-requests==2.31.0  # Untuk HTTP requests ke Grafana
+grafana-client==3.0.0
+torchsummary==1.5.1
+dvc[s3]==3.30.1
+cycler==0.11.0
+contourpy==1.1.0
+boto3==1.28.36
+s3transfer==0.6.2
+botocore==1.31.36
+six==1.16.0
+python-dateutil==2.8.2
+prometheus_client==0.17.1
+seaborn==0.12.2
+requests==2.31.0
+colorama==0.4.5
+configobj==5.0.8

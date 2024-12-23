@@ -15,8 +15,9 @@ WORKDIR /app
 # Copy requirements file
 COPY requirements.txt .
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Install Python dependencies with specific flags to avoid resolver issues
+RUN pip install --no-cache-dir --no-deps -r requirements.txt && \
+    pip install --no-cache-dir colorama==0.4.5 configobj==5.0.8
 
 # Copy the rest of the application
 COPY . .
@@ -26,6 +27,7 @@ EXPOSE 8000
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
+ENV PIP_DEFAULT_TIMEOUT=100
 
-# Default command (can be overridden)
+# Default command
 CMD ["python", "script/train.py"]
