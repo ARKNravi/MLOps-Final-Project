@@ -23,10 +23,10 @@ jobs:
 
             - name: Install ngrok
               run: |
-                  curl -Lo ngrok.zip https://bin.equinox.io/c/4VmDzA7iaHb/ngrok-stable-linux-amd64.zip
-                  unzip ngrok.zip
-                  chmod +x ngrok
-                  sudo mv ngrok /usr/local/bin
+                  # Download and install latest ngrok
+                  curl -Lo ngrok.tgz https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz
+                  sudo tar xvzf ngrok.tgz -C /usr/local/bin
+                  ngrok --version
 
             - name: Start monitoring stack
               run: |
