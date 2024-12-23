@@ -18,11 +18,26 @@ from prometheus_client import start_http_server, Gauge
 import time
 import json
 
-# MLflow Tracking URI
+# MLflow configuration
 MLFLOW_TRACKING_URI = "https://dagshub.com/salsazufar/project-akhir-mlops.mlflow"
 mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
-os.environ['MLFLOW_TRACKING_USERNAME'] = os.getenv('DAGSHUB_USERNAME')
-os.environ['MLFLOW_TRACKING_PASSWORD'] = os.getenv('DAGSHUB_TOKEN')
+
+# Set MLflow credentials directly from environment variables
+mlflow.set_tracking_username(os.environ.get('DAGSHUB_USERNAME'))
+mlflow.set_tracking_password(os.environ.get('DAGSHUB_TOKEN'))
+
+# Print for debugging
+print(f"MLflow Tracking URI: {MLFLOW_TRACKING_URI}")
+print(f"DagsHub Username: {os.environ.get('DAGSHUB_USERNAME')}")
+print("Attempting to connect to MLflow...")
+
+try:
+    # Test MLflow connection
+    mlflow.set_experiment("default")
+    print("Successfully connected to MLflow")
+except Exception as e:
+    print(f"Error connecting to MLflow: {e}")
+    raise
 
 # Hyperparameters
 num_epochs = 3
@@ -124,7 +139,7 @@ def log_to_grafana(metric_name, value, labels=None):
     if not labels:
         labels = {}
     
-    # Update both Prometheus and Grafana
+    # Update Prometheus metrics
     if metric_name == 'train_loss':
         TRAIN_LOSS.set(value)
     elif metric_name == 'train_accuracy':
@@ -146,17 +161,19 @@ def log_to_grafana(metric_name, value, labels=None):
     }
     
     headers = {
-        "Authorization": f"Bearer {os.getenv('PROMETHEUS_API_KEY')}",
+        "Authorization": f"Bearer {os.environ.get('PROMETHEUS_API_KEY')}",
         "Content-Type": "application/json"
     }
     
     try:
         response = requests.post(
-            os.getenv('PROMETHEUS_REMOTE_WRITE_URL'),
+            os.environ.get('PROMETHEUS_REMOTE_WRITE_URL'),
             json=metric,
             headers=headers,
-            auth=(os.getenv('PROMETHEUS_USERNAME'), os.getenv('PROMETHEUS_API_KEY'))
+            auth=(os.environ.get('PROMETHEUS_USERNAME'), os.environ.get('PROMETHEUS_API_KEY'))
         )
+        
+        # Send to Loki
         log_message = {
             "level": "info",
             "message": f"Metric logged: {metric_name}={value}",
@@ -165,7 +182,6 @@ def log_to_grafana(metric_name, value, labels=None):
             "timestamp": timestamp
         }
         
-        # Send to Loki
         loki_payload = {
             "streams": [{
                 "stream": {
@@ -177,9 +193,9 @@ def log_to_grafana(metric_name, value, labels=None):
         }
         
         loki_response = requests.post(
-            f"{os.getenv('LOKI_URL')}/loki/api/v1/push",
+            f"{os.environ.get('LOKI_URL')}/loki/api/v1/push",
             json=loki_payload,
-            auth=(os.getenv('LOKI_USERNAME'), os.getenv('LOKI_API_KEY'))
+            auth=(os.environ.get('LOKI_USERNAME'), os.environ.get('LOKI_API_KEY'))
         )
         print(f"Log sent to Loki: {log_message}")
         

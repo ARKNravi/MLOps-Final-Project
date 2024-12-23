@@ -175,6 +175,7 @@ jobs:
                   LOKI_USERNAME: "1050298"
                   PROMETHEUS_REMOTE_WRITE_URL: "https://prometheus-prod-37-prod-ap-southeast-1.grafana.net/api/prom/push"
                   LOKI_URL: "https://logs-prod-020.grafana.net"
+                  MLFLOW_TRACKING_URI: "https://dagshub.com/salsazufar/project-akhir-mlops.mlflow"
               run: |
                   docker pull ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest
 
@@ -191,7 +192,7 @@ jobs:
                       -e LOKI_USERNAME="$LOKI_USERNAME" \
                       -e PROMETHEUS_REMOTE_WRITE_URL="$PROMETHEUS_REMOTE_WRITE_URL" \
                       -e LOKI_URL="$LOKI_URL" \
-                      -e MLFLOW_TRACKING_URI="http://localhost:5000" \
+                      -e MLFLOW_TRACKING_URI="$MLFLOW_TRACKING_URI" \
                       -v ${{ github.workspace }}:/app \
                       -w /app \
                       --network host \
