@@ -222,7 +222,15 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs):
             epoch_start_time = time.time()
             
             for phase in ['train', 'val']:
+                if phase == 'train':
+                    model.train()
+                else:
+                    model.eval()
+
+                running_loss = 0.0
+                running_corrects = 0
                 batch_times = []
+
                 for batch_idx, (inputs, labels) in enumerate(dataloaders[phase]):
                     batch_start_time = time.time()
                     
@@ -254,12 +262,16 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs):
                 epoch_loss = running_loss / dataset_sizes[phase]
                 epoch_acc = running_corrects.double() / dataset_sizes[phase]
                 
-                # Log metrics
+                # Log metrics to MLflow
+                mlflow.log_metric(f"{phase}_loss", epoch_loss, step=epoch)
+                mlflow.log_metric(f"{phase}_accuracy", epoch_acc.item(), step=epoch)
+                
+                # Log metrics to Grafana
                 log_to_grafana(f"{phase}_loss", epoch_loss, {
                     "epoch": str(epoch),
                     "phase": phase
                 })
-                log_to_grafana(f"{phase}_accuracy", epoch_acc, {
+                log_to_grafana(f"{phase}_accuracy", epoch_acc.item(), {
                     "epoch": str(epoch),
                     "phase": phase
                 })
@@ -269,30 +281,30 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs):
                     current_lr = optimizer.param_groups[0]['lr']
                     LEARNING_RATE.set(current_lr)
                     log_to_grafana("learning_rate", current_lr, {"epoch": str(epoch)})
+                    mlflow.log_metric("learning_rate", current_lr, step=epoch)
             
+                print(f'Epoch {epoch}/{num_epochs-1} {phase} Loss: {epoch_loss:.4f} Acc: {epoch_acc:.4f}')
+
+                # Save best model weights
+                if phase == 'val' and epoch_acc > best_acc:
+                    best_acc = epoch_acc
+                    best_model_wts = copy.deepcopy(model.state_dict())
+
             # Log epoch time
             epoch_time = time.time() - epoch_start_time
             EPOCH_TIME.set(epoch_time)
             log_to_grafana("epoch_time", epoch_time, {"epoch": str(epoch)})
+            mlflow.log_metric("epoch_time", epoch_time, step=epoch)
 
             if phase == 'train':
                 scheduler.step()
 
-            epoch_loss = running_loss / dataset_sizes[phase]
-            epoch_acc = running_corrects.double() / dataset_sizes[phase]
-
-            print(f'{phase} Loss: {epoch_loss:.4f} Acc: {epoch_acc:.4f}')
-
-            # Save best model weights
-            if phase == 'val' and epoch_acc > best_acc:
-                best_acc = epoch_acc
-                best_model_wts = copy.deepcopy(model.state_dict())
-
         # Save the best model
         model.load_state_dict(best_model_wts)
-
-        # Log the best model to MLflow
         mlflow.pytorch.log_model(model, "best_model")
+
+        # Log final metrics
+        mlflow.log_metric("best_accuracy", best_acc.item())
 
         # Perform Model Registry if accuracy threshold is met
         if best_acc >= accuracy_threshold:
