@@ -2,7 +2,7 @@ import os
 import json
 import snappy
 import requests
-from prometheus_remote_write_pb2 import WriteRequest, Timeseries, Label, Sample
+from remote_write_pb2 import WriteRequest, TimeSeries, Label, Sample
 from datetime import datetime
 
 def send_metric():
@@ -12,7 +12,7 @@ def send_metric():
     # Inisialisasi WriteRequest
     write_req = WriteRequest()
 
-    # Tambahkan Timeseries
+    # Tambahkan TimeSeries
     ts = write_req.timeseries.add()
     ts.labels.add(name="__name__", value="test_metric")
     ts.labels.add(name="job", value="github_actions_test")

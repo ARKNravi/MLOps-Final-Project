@@ -62,7 +62,8 @@ jobs:
               run: |
                   # Install dependencies
                   sudo apt-get update && sudo apt-get install -y python3-pip
-                  pip3 install prometheus-client requests snappy prometheus-remote-write-py
+                  sudo apt-get install -y protobuf-compiler
+                  pip3 install prometheus-client requests snappy protobuf
 
                   # Buat script Python untuk mengirim metrik
                   cat > send_metric.py << EOF
@@ -70,6 +71,12 @@ jobs:
                   import requests
                   import json
                   import os
+
+                  # Download remote_write.proto
+                  wget https://raw.githubusercontent.com/prometheus/prometheus/main/prompb/remote_write.proto -O remote_write.proto
+
+                  # Generate remote_write_pb2.py
+                  protoc --python_out=. remote_write.proto
 
                   def send_metric():
                       # Buat timestamp dalam format yang benar
