@@ -16,6 +16,8 @@ import datetime
 import requests
 import json
 import snappy
+from prometheus_client.core import Sample, Metric
+from google.protobuf.timestamp_pb2 import Timestamp
 
 # MLflow Tracking URI
 MLFLOW_TRACKING_URI = "https://dagshub.com/salsazufar/project-akhir-mlops.mlflow"
@@ -163,6 +165,24 @@ def log_test_metrics_to_grafana(metrics_dict):
         except Exception as e:
             print(f"Error logging test metric: {e}")
 
+def create_write_request(metric_name, value, labels):
+    timestamp = Timestamp()
+    timestamp.GetCurrentTime()
+    
+    # Buat sampel metrik
+    sample = Sample(
+        name=metric_name,
+        labels=labels,
+        value=float(value),
+        timestamp=int(time.time() * 1000)
+    )
+    
+    # Buat metrik
+    metric = Metric(metric_name, f'Metric {metric_name}', 'gauge')
+    metric.samples = [sample]
+    
+    return metric
+
 def log_to_grafana(metric_name, value, labels=None):
     if not labels:
         labels = {}
@@ -172,14 +192,14 @@ def log_to_grafana(metric_name, value, labels=None):
     labels['job'] = 'mlops_training'
     
     try:
-        # Setup registry dan gauge
+        # Setup registry dan buat write request
         registry = CollectorRegistry()
-        g = Gauge(metric_name, f'Metric {metric_name}', labelnames=labels.keys(), registry=registry)
-        g.labels(**labels).set(float(value))
+        metric = create_write_request(metric_name, value, labels)
+        registry.register(metric)
         
-        # Generate dan kompres data metrik menggunakan python-snappy
-        metric_data = generate_latest(registry)
-        compressed_data = snappy.compress(metric_data)
+        # Generate dan kompres data
+        data = generate_latest(registry)
+        compressed_data = snappy.compress(data)
         
         # Kirim ke Prometheus
         response = requests.post(
