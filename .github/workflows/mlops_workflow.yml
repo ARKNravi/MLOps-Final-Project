@@ -64,8 +64,8 @@ jobs:
                   sudo apt-get update && sudo apt-get install -y python3-pip
                   sudo apt-get install -y protobuf-compiler
                   pip3 install prometheus-client requests snappy protobuf
-                  # Menggunakan remote_write.proto lokal yang disimpan di folder protos/
-                  protoc --python_out=. protos/remote_write.proto
+                  # Generate remote_write_pb2.py dari protos/remote_write.proto
+                  protoc --python_out=script/ protos/remote_write.proto
 
                   # Buat script Python untuk mengirim metrik
                   cat > send_metric.py << EOF
