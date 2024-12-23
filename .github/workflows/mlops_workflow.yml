@@ -106,8 +106,8 @@ jobs:
                   from datetime import datetime, UTC
 
                   def send_metric():
-                      # Buat timestamp dalam format yang benar (nanodetik)
-                      timestamp_ns = int(datetime.now(UTC).timestamp() * 1e9)
+                      # Buat timestamp dalam format yang benar (millisekon)
+                      timestamp_ms = int(datetime.now(UTC).timestamp() * 1000)
                       
                       # Inisialisasi WriteRequest
                       write_req = WriteRequest()
@@ -131,7 +131,7 @@ jobs:
                       # Tambahkan Sample
                       sample = ts.samples.add()
                       sample.value = 1.0
-                      sample.timestamp = timestamp_ns
+                      sample.timestamp = timestamp_ms
                       
                       # Serialize ke Protobuf
                       data = write_req.SerializeToString()
