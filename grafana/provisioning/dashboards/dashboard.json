@@ -73,8 +73,58 @@
                 }
             ],
             "id": 5
+        },
+        {
+            "title": "Training Metrics",
+            "type": "graph",
+            "datasource": "Grafana Cloud ArknRavi Prom",
+            "targets": [
+                {
+                    "expr": "train_loss{job=\"mlops_training\"}",
+                    "legendFormat": "Training Loss"
+                },
+                {
+                    "expr": "val_loss{job=\"mlops_training\"}",
+                    "legendFormat": "Validation Loss"
+                },
+                {
+                    "expr": "train_accuracy{job=\"mlops_training\"}",
+                    "legendFormat": "Training Accuracy"
+                },
+                {
+                    "expr": "val_accuracy{job=\"mlops_training\"}",
+                    "legendFormat": "Validation Accuracy"
+                }
+            ]
+        },
+        {
+            "title": "GitHub Actions Test Metric",
+            "type": "graph",
+            "targets": [
+                {
+                    "expr": "test_metric{job=\"github_actions_test\"}",
+                    "legendFormat": "Test Metric"
+                }
+            ]
         }
     ],
     "schemaVersion": 30,
-    "version": 1
+    "version": 1,
+    "alerts": [
+        {
+            "name": "Metric Push Failed",
+            "conditions": [
+                {
+                    "type": "query",
+                    "query": {
+                        "params": ["A", "5m", "now"]
+                    },
+                    "reducer": { "type": "avg", "params": [] },
+                    "evaluator": { "type": "lt", "params": [1] }
+                }
+            ],
+            "frequency": "1m",
+            "handler": 1
+        }
+    ]
 }
