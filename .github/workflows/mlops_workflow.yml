@@ -56,32 +56,105 @@ jobs:
             # Menambahkan langkah untuk memverifikasi pengiriman metrik
             - name: Test Metric Push
               env:
-                  PROMETHEUS_PUSHGATEWAY_URL: ${{ secrets.PROMETHEUS_PUSHGATEWAY_URL }}
+                  PROMETHEUS_API_KEY: ${{ secrets.PROMETHEUS_API_KEY }}
+                  PROMETHEUS_USERNAME: "1902030"
+                  PROMETHEUS_REMOTE_WRITE_URL: ${{ secrets.PROMETHEUS_REMOTE_WRITE_URL }}
               run: |
                   # Install dependencies
                   sudo apt-get update && sudo apt-get install -y python3-pip
-                  pip3 install prometheus-client requests
+                  pip3 install prometheus-client requests protobuf python-snappy
 
                   # Buat script Python untuk mengirim metrik
                   cat > send_metric.py << EOF
-                  from prometheus_client import CollectorRegistry, Gauge, push_to_gateway
+                  import time
+                  import requests
+                  import snappy
+                  from prometheus_client import CollectorRegistry, Gauge
+                  from prometheus_client.core import Sample, Metric
                   import os
+                  import struct
+                  from prometheus_client.samples import Exemplar
+
+                  def create_prometheus_write_request():
+                      # Buat timestamp dalam format yang benar
+                      timestamp_ms = int(time.time() * 1000)
+
+                      # Buat label dalam format yang benar
+                      labels = [
+                          {'name': '__name__', 'value': 'test_metric'},
+                          {'name': 'job', 'value': 'github_actions_test'},
+                          {'name': 'instance', 'value': 'test'},
+                          {'name': 'environment', 'value': 'github_actions'}
+                      ]
+
+                      # Buat timeseries dalam format yang benar
+                      timeseries = {
+                          'labels': labels,
+                          'samples': [{'value': 1.0, 'timestamp': timestamp_ms}]
+                      }
+
+                      # Buat write request dalam format yang benar
+                      write_request = {
+                          'timeseries': [timeseries]
+                      }
+
+                      # Konversi ke format protobuf yang benar
+                      data = b''
+                      for ts in write_request['timeseries']:
+                          # Write labels
+                          for label in ts['labels']:
+                              # Write label name length and name
+                              name_bytes = label['name'].encode('utf-8')
+                              data += struct.pack('!H', len(name_bytes))
+                              data += name_bytes
+                              # Write label value length and value
+                              value_bytes = label['value'].encode('utf-8')
+                              data += struct.pack('!H', len(value_bytes))
+                              data += value_bytes
+
+                          # Write samples
+                          for sample in ts['samples']:
+                              # Write timestamp (64-bit integer)
+                              data += struct.pack('!Q', sample['timestamp'])
+                              # Write value (64-bit float)
+                              data += struct.pack('!d', sample['value'])
+
+                      return data
 
                   def send_metric():
-                      registry = CollectorRegistry()
-                      g = Gauge('test_metric', 'Test metric', registry=registry)
-                      g.set(1.0)
-
-                      url = os.environ['PROMETHEUS_PUSHGATEWAY_URL']
+                      url = os.environ['PROMETHEUS_REMOTE_WRITE_URL']
+                      username = os.environ['PROMETHEUS_USERNAME']
+                      password = os.environ['PROMETHEUS_API_KEY']
 
                       try:
-                          # Kirim metrik ke Prometheus Pushgateway
-                          push_to_gateway(
+                          # Buat dan kompres data
+                          data = create_prometheus_write_request()
+                          compressed_data = snappy.compress(data)
+
+                          # Kirim request
+                          response = requests.post(
                               url,
-                              job='github_actions_test',
-                              registry=registry
+                              data=compressed_data,
+                              auth=(username, password),
+                              headers={
+                                  'Content-Type': 'application/x-protobuf',
+                                  'Content-Encoding': 'snappy',
+                                  'X-Prometheus-Remote-Write-Version': '0.1.0',
+                                  'X-Scope-OrgID': username
+                              }
                           )
-                          print("✅ Metric sent successfully")
+                          
+                          print(f"Status code: {response.status_code}")
+                          print(f"Headers: {response.headers}")
+                          if response.text:
+                              print(f"Response: {response.text}")
+                          
+                          if response.status_code in [200, 204]:
+                              print("✅ Metric sent successfully")
+                          else:
+                              print("❌ Failed to send metric")
+                              if response.text:
+                                  print(f"Error: {response.text}")
                       except Exception as e:
                           print(f"Error sending metric: {e}")
                           exit(1)
