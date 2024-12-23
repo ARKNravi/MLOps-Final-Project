@@ -15,89 +15,34 @@ jobs:
             - name: Checkout repository
               uses: actions/checkout@v2
 
-            - name: Install Docker Compose
-              run: |
-                  sudo curl -L "https://github.com/docker/compose/releases/download/v2.24.5/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-                  sudo chmod +x /usr/local/bin/docker-compose
-                  docker-compose --version
-
-            - name: Install ngrok
-              run: |
-                  # Download and install latest ngrok
-                  curl -Lo ngrok.tgz https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz
-                  sudo tar xvzf ngrok.tgz -C /usr/local/bin
-                  ngrok --version
-
-            - name: Start monitoring stack
-              run: |
-                  docker-compose -f docker-compose.monitoring.yml up -d
-
-            - name: Configure and start ngrok
+            - name: Configure Grafana Cloud
               env:
-                  NGROK_AUTHTOKEN: ${{ secrets.NGROK_AUTHTOKEN }}
+                  GRAFANA_CLOUD_API_KEY: ${{ secrets.GRAFANA_CLOUD_API_KEY }}
+                  GRAFANA_CLOUD_API_URL: ${{ secrets.GRAFANA_CLOUD_URL }}
+                  PROMETHEUS_REMOTE_WRITE_URL: ${{ secrets.PROMETHEUS_REMOTE_WRITE_URL }}
+                  LOKI_URL: ${{ secrets.LOKI_URL }}
               run: |
-                  # Create ngrok config with the actual token
-                  cat > ngrok.yml << EOF
-                  version: "2"
-                  authtoken: ${{ secrets.NGROK_AUTHTOKEN }}
-                  tunnels:
-                      grafana:
-                          addr: 3000
-                          proto: http
-                      prometheus:
-                          addr: 9090
-                          proto: http
-                      loki:
-                          addr: 3100
-                          proto: http
+                  # Setup Prometheus remote write configuration
+                  cat > prometheus.yml << EOF
+                  global:
+                    scrape_interval: 15s
+                    evaluation_interval: 15s
+                    
+                  remote_write:
+                    - url: ${PROMETHEUS_REMOTE_WRITE_URL}
+                      basic_auth:
+                        username: ${GRAFANA_CLOUD_API_KEY}
+                        password: ${GRAFANA_CLOUD_API_KEY}
+                        
+                  scrape_configs:
+                    - job_name: 'mlops-metrics'
+                      static_configs:
+                        - targets: ['localhost:8000']
                   EOF
 
-                  # Start ngrok in background
-                  ngrok start --all --config ngrok.yml > ngrok.log 2>&1 &
-
-                  # Wait for ngrok to start
-                  echo "Waiting for ngrok to start..."
-                  for i in {1..30}; do
-                      if curl -s http://localhost:4040/api/tunnels > /dev/null; then
-                          echo "Ngrok is running"
-                          break
-                      fi
-                      if [ $i -eq 30 ]; then
-                          echo "Timeout waiting for ngrok"
-                          cat ngrok.log
-                          exit 1
-                      fi
-                      sleep 1
-                  done
-
-                  # Get tunnel URLs
-                  curl -s http://localhost:4040/api/tunnels > tunnels.json
-
-                  # Extract and display URLs
-                  GRAFANA_URL=$(jq -r '.tunnels[] | select(.name=="grafana") | .public_url' tunnels.json)
-                  PROMETHEUS_URL=$(jq -r '.tunnels[] | select(.name=="prometheus") | .public_url' tunnels.json)
-                  LOKI_URL=$(jq -r '.tunnels[] | select(.name=="loki") | .public_url' tunnels.json)
-
-                  echo "Grafana URL: $GRAFANA_URL"
-                  echo "Prometheus URL: $PROMETHEUS_URL"
-                  echo "Loki URL: $LOKI_URL"
-
-                  # Save URLs as environment variables
-                  echo "GRAFANA_URL=$GRAFANA_URL" >> $GITHUB_ENV
-                  echo "PROMETHEUS_URL=$PROMETHEUS_URL" >> $GITHUB_ENV
-                  echo "LOKI_URL=$LOKI_URL" >> $GITHUB_ENV
-
-            # Optional: Verify services are accessible
-            - name: Verify services
-              run: |
-                  echo "Checking Grafana..."
-                  curl -s $GRAFANA_URL/api/health
-
-                  echo "Checking Prometheus..."
-                  curl -s $PROMETHEUS_URL/-/healthy
-
-                  echo "Checking Loki..."
-                  curl -s $LOKI_URL/ready
+                  # Verify configuration
+                  echo "Testing connection to Grafana Cloud..."
+                  curl -I -H "Authorization: Bearer ${GRAFANA_CLOUD_API_KEY}" ${GRAFANA_CLOUD_API_URL}/api/health
 
     # Step 1: Build Base Image with Dependencies
     build_and_cache_dependencies:
