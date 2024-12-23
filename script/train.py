@@ -125,6 +125,13 @@ def log_confusion_matrix(model, dataloader, class_names):
 def send_metric_to_prometheus(metric_name, value, job="mlops_training"):
     timestamp_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
     
+    # Ensure value is a float
+    try:
+        value = float(value)
+    except (TypeError, ValueError) as e:
+        print(f"Error converting metric value to float: {e}")
+        return False
+    
     write_req = WriteRequest()
     ts = write_req.timeseries.add()
     
@@ -134,10 +141,10 @@ def send_metric_to_prometheus(metric_name, value, job="mlops_training"):
         ("environment", "github_actions")
     ]
     
-    for name, value in labels:
+    for name, label_value in labels:
         label = ts.labels.add()
         label.name = name
-        label.value = value
+        label.value = str(label_value)
     
     sample = ts.samples.add()
     sample.value = value
