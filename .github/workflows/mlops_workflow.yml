@@ -68,43 +68,40 @@ jobs:
                   cat > send_metric.py << EOF
                   import time
                   import requests
-                  from prometheus_client import CollectorRegistry, Gauge, push_to_gateway
+                  import json
                   import os
 
                   def send_metric():
-                      registry = CollectorRegistry()
-                      g = Gauge('test_metric', 'Test metric', registry=registry)
-                      g.set(1.0)
+                      timestamp_ms = int(time.time() * 1000)
+                      
+                      # Format metrik sesuai dengan Grafana Cloud API
+                      payload = [{
+                          "stream": {
+                              "__name__": "test_metric",
+                              "job": "github_actions_test",
+                              "instance": "test",
+                              "environment": "github_actions"
+                          },
+                          "values": [[str(timestamp_ms), "1.0"]]
+                      }]
 
                       url = os.environ['PROMETHEUS_REMOTE_WRITE_URL']
                       username = os.environ['PROMETHEUS_USERNAME']
                       password = os.environ['PROMETHEUS_API_KEY']
 
                       try:
-                          # Kirim metrik menggunakan HTTP POST biasa
                           response = requests.post(
                               url,
+                              json=payload,
+                              auth=(username, password),
                               headers={
                                   'Content-Type': 'application/json',
                                   'X-Scope-OrgID': username
-                              },
-                              auth=(username, password),
-                              json={
-                                  'metrics': [{
-                                      'name': 'test_metric',
-                                      'type': 'gauge',
-                                      'value': 1.0,
-                                      'timestamp': int(time.time() * 1000),
-                                      'labels': {
-                                          'job': 'github_actions_test',
-                                          'instance': 'test',
-                                          'environment': 'github_actions'
-                                      }
-                                  }]
                               }
                           )
                           
                           print(f"Status code: {response.status_code}")
+                          print(f"Headers: {response.headers}")
                           if response.text:
                               print(f"Response: {response.text}")
                           
