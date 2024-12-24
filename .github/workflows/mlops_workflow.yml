@@ -205,15 +205,43 @@ jobs:
 
                   def test_loki_connection():
                       print("🔍 Testing Loki connection...")
-                      url = f"{os.environ['LOKI_URL']}/ready"
+                      
+                      # Test dengan mengirim log sederhana
+                      timestamp = int(time.time() * 1e9)
+                      payload = {
+                          "streams": [{
+                              "stream": {
+                                  "job": "mlops_training",
+                                  "environment": "github_actions",
+                                  "level": "info",
+                                  "test": "true",
+                                  "component": "connection_test"
+                              },
+                              "values": [
+                                  [str(timestamp), json.dumps({
+                                      "message": "Loki connection test",
+                                      "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                  })]
+                              ]
+                          }]
+                      }
+                      
                       try:
-                          response = requests.get(url)
-                          print(f"✨ Loki readiness check: {response.status_code}")
-                          if response.status_code == 200:
-                              print("✅ Loki is ready to receive logs")
-                          return response.status_code == 200
+                          response = requests.post(
+                              f"{os.environ['LOKI_URL']}/loki/api/v1/push",
+                              json=payload,
+                              auth=(os.environ['LOKI_USERNAME'], os.environ['LOKI_API_KEY']),
+                              headers={"Content-Type": "application/json"}
+                          )
+                          print(f"✨ Loki connection test status: {response.status_code}")
+                          if response.status_code == 204:
+                              print("✅ Successfully connected to Loki")
+                              return True
+                          else:
+                              print(f"❌ Connection failed: {response.text}")
+                              return False
                       except Exception as e:
-                          print(f"❌ Error checking Loki readiness: {e}")
+                          print(f"❌ Connection error: {e}")
                           return False
 
                   def send_test_logs():
@@ -261,14 +289,14 @@ jobs:
                           
                           payload = {
                               "streams": [{
-                          "stream": {
-                            "job": "mlops_training",
-                            "environment": "github_actions",
+                                  "stream": {
+                                      "job": "mlops_training",
+                                      "environment": "github_actions",
                                       "level": log["level"],
                                       "test": "true",
                                       "component": "pipeline_test"
-                          },
-                          "values": [
+                                  },
+                                  "values": [
                                       [str(timestamp), json.dumps(log_entry)]
                                   ]
                               }]
@@ -298,17 +326,18 @@ jobs:
                       return success_count == len(test_logs)
 
                   if __name__ == "__main__":
+                      print("\n🔄 Testing Loki connectivity...")
                       if test_loki_connection():
                           print("\n🚀 Starting log sending test...")
                           if send_test_logs():
                               print("\n✅ All test logs sent successfully!")
                               print("\n🔍 To verify logs in Grafana Loki, use these queries:")
-                              print("\n1. View all pipeline test logs:")
-                              print('   {job="mlops_training", test="true", component="pipeline_test"}')
-                              print("\n2. View specific log levels:")
-                              print('   {job="mlops_training", test="true"} | json | level="info"')
-                              print("\n3. Search for specific messages:")
-                              print('   {job="mlops_training", test="true"} |= "Pipeline"')
+                              print("\n1. View connection test:")
+                              print('   {job="mlops_training", component="connection_test"}')
+                              print("\n2. View pipeline test logs:")
+                              print('   {job="mlops_training", component="pipeline_test"}')
+                              print("\n3. View all test logs:")
+                              print('   {job="mlops_training", test="true"}')
                               print("\n4. View numeric values:")
                               print('   {job="mlops_training", test="true"} | json | metric_value > 0')
                           else:
