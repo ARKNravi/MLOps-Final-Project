@@ -747,6 +747,8 @@ jobs:
                   PROMETHEUS_REMOTE_WRITE_URL: ${{ secrets.PROMETHEUS_REMOTE_WRITE_URL }}
                   LOKI_URL: ${{ secrets.LOKI_URL }}
                   MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+                  SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+                  SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
               run: |
                   docker run \
                       -e DOCKER_USERNAME="$DOCKER_USERNAME" \
@@ -762,11 +764,15 @@ jobs:
                       -e PROMETHEUS_REMOTE_WRITE_URL="$PROMETHEUS_REMOTE_WRITE_URL" \
                       -e LOKI_URL="$LOKI_URL" \
                       -e MLFLOW_TRACKING_URI="$MLFLOW_TRACKING_URI" \
+                      -e SUPABASE_URL="$SUPABASE_URL" \
+                      -e SUPABASE_KEY="$SUPABASE_KEY" \
                       -v ${{ github.workspace }}:/app \
                       -w /app \
                       --network host \
                       ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest \
                       bash -c "
+                        echo 'Installing additional dependencies...' &&
+                        pip install supabase-py &&
                         echo 'Starting training...' &&
                         python script/train.py &&
                         python script/test.py
