@@ -728,9 +728,9 @@ jobs:
                   MLFLOW_TRACKING_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
                   MLFLOW_TRACKING_PASSWORD: ${{ secrets.DAGSHUB_TOKEN }}
               run: |
-                  # Create temporary directory for MLflow artifacts
-                  mkdir -p /tmp/mlflow/artifacts
-                  export MLFLOW_ARTIFACTS_DESTINATION=/tmp/mlflow/artifacts
+                  # Create artifacts directory in workspace
+                  mkdir -p $GITHUB_WORKSPACE/mlflow_artifacts
+                  export MLFLOW_ARTIFACTS_DESTINATION=$GITHUB_WORKSPACE/mlflow_artifacts
 
                   pip install mlflow scikit-learn pandas numpy requests
                   python - << EOF
@@ -741,7 +741,7 @@ jobs:
                   from datetime import datetime, timedelta
                   import os
 
-                  # Set MLflow tracking URI and temp artifact location
+                  # Set MLflow tracking URI
                   mlflow.set_tracking_uri(os.environ['MLFLOW_TRACKING_URI'])
                   print(f"MLflow tracking URI: {mlflow.get_tracking_uri()}")
                   print(f"MLflow artifact location: {os.environ.get('MLFLOW_ARTIFACTS_DESTINATION')}")
@@ -754,64 +754,54 @@ jobs:
                       max_results=5
                   )
 
-                  # Collect metrics for comparison
-                  comparison_data = []
-                  for run in runs:
-                      metrics = {
-                          "run_id": run.info.run_id,
-                          "accuracy": run.data.metrics.get("test_accuracy", 0),
-                          "loss": run.data.metrics.get("test_loss", 0),
-                          "training_time": run.data.metrics.get("total_training_time", 0),
-                          "timestamp": run.info.start_time,
-                      }
-                      comparison_data.append(metrics)
-
                   # Create comparison report
-                  if comparison_data:
-                      df = pd.DataFrame(comparison_data)
-                      best_accuracy_idx = df["accuracy"].idxmax() if not df.empty else 0
-                      mean_accuracy = df["accuracy"].mean() if not df.empty else 0
+                  report = {
+                      "best_model": {
+                          "run_id": "no_runs",
+                          "accuracy": 0,
+                          "improvement": 0
+                      },
+                      "trend": {
+                          "accuracy_trend": 0,
+                          "loss_trend": 0
+                      },
+                      "comparison": []
+                  }
+
+                  if runs:
+                      comparison_data = []
+                      for run in runs:
+                          metrics = {
+                              "run_id": run.info.run_id,
+                              "accuracy": run.data.metrics.get("test_accuracy", 0),
+                              "loss": run.data.metrics.get("test_loss", 0),
+                              "training_time": run.data.metrics.get("total_training_time", 0),
+                              "timestamp": run.info.start_time
+                          }
+                          comparison_data.append(metrics)
                       
-                      report = {
-                          "best_model": {
-                              "run_id": df.loc[best_accuracy_idx, "run_id"] if not df.empty else "no_runs",
-                              "accuracy": float(df["accuracy"].max()) if not df.empty else 0,
-                              "improvement": float(df["accuracy"].max() - mean_accuracy) if not df.empty else 0
-                          },
-                          "trend": {
-                              "accuracy_trend": float(df["accuracy"].diff().mean()) if len(df) > 1 else 0,
-                              "loss_trend": float(df["loss"].diff().mean()) if len(df) > 1 else 0
-                          },
-                          "comparison": df.to_dict(orient="records") if not df.empty else []
-                      }
-                  else:
-                      report = {
-                          "best_model": {
-                              "run_id": "no_runs",
-                              "accuracy": 0,
-                              "improvement": 0
-                          },
-                          "trend": {
-                              "accuracy_trend": 0,
-                              "loss_trend": 0
-                          },
-                          "comparison": []
-                      }
+                      df = pd.DataFrame(comparison_data)
+                      if not df.empty:
+                          best_accuracy_idx = df["accuracy"].idxmax()
+                          mean_accuracy = df["accuracy"].mean()
+                          
+                          report.update({
+                              "best_model": {
+                                  "run_id": df.loc[best_accuracy_idx, "run_id"],
+                                  "accuracy": float(df["accuracy"].max()),
+                                  "improvement": float(df["accuracy"].max() - mean_accuracy)
+                              },
+                              "trend": {
+                                  "accuracy_trend": float(df["accuracy"].diff().mean()) if len(df) > 1 else 0,
+                                  "loss_trend": float(df["loss"].diff().mean()) if len(df) > 1 else 0
+                              },
+                              "comparison": df.to_dict(orient="records")
+                          })
 
-                  # Save comparison report to temp directory
-                  report_path = "/tmp/mlflow/artifacts/model_comparison.json"
-                  os.makedirs(os.path.dirname(report_path), exist_ok=True)
-                  with open(report_path, "w") as f:
+                  # Save report for next steps
+                  report_path = os.path.join(os.environ['GITHUB_WORKSPACE'], 'model_comparison.json')
+                  with open(report_path, 'w') as f:
                       json.dump(report, f, indent=2)
-
-                  # Log comparison to MLflow
-                  with mlflow.start_run(run_name="model_comparison"):
-                      mlflow.log_metrics({
-                          "best_accuracy": report["best_model"]["accuracy"],
-                          "accuracy_improvement": report["best_model"]["improvement"],
-                          "accuracy_trend": report["trend"]["accuracy_trend"]
-                      })
-                      mlflow.log_artifact(report_path)
 
                   # Print summary
                   print("\n📊 Model Comparison Summary:")
@@ -819,10 +809,6 @@ jobs:
                   print(f"Best Accuracy: {report['best_model']['accuracy']:.4f}")
                   print(f"Improvement: {report['best_model']['improvement']:.4f}")
                   print(f"Accuracy Trend: {report['trend']['accuracy_trend']:.4f}")
-
-                  # Save report for next step
-                  with open("/tmp/mlflow/artifacts/model_comparison.json", "w") as f:
-                      json.dump(report, f)
                   EOF
 
             - name: Perform A/B Testing Analysis
