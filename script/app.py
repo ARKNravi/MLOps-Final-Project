@@ -50,7 +50,12 @@ model = initialize_model(num_classes).to(device)
 @st.cache_resource
 def load_model():
     try:
-        model_path = os.path.join(os.path.dirname(__file__), "..", "model", "best_model_weights.pth")
+        # Coba load model dari path relatif
+        model_path = os.path.join("model", "best_model_weights.pth")
+        if not os.path.exists(model_path):
+            # Coba path absolut
+            model_path = os.path.join(os.path.dirname(__file__), "..", "model", "best_model_weights.pth")
+        
         if os.path.exists(model_path):
             model.load_state_dict(torch.load(model_path, map_location=device))
             model.eval()
