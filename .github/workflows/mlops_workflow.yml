@@ -617,16 +617,11 @@ jobs:
                               # Convert Unix timestamp to datetime
                               return datetime.fromtimestamp(ts_str, tz=timezone.utc)
                           
-                          # Remove microseconds if present
-                          if '.' in ts_str:
-                              ts_str = ts_str.split('.')[0]
-                          
-                          # Try parsing with timezone
-                          try:
-                              return datetime.fromisoformat(ts_str)
-                          except:
-                              # If no timezone, assume UTC
-                              return datetime.fromisoformat(ts_str).replace(tzinfo=timezone.utc)
+                          # Convert string to datetime with UTC timezone
+                          dt = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
+                          if dt.tzinfo is None:
+                              dt = dt.replace(tzinfo=timezone.utc)
+                          return dt
                       except Exception as e:
                           print(f"⚠️ Error parsing timestamp {ts_str}: {e}")
                           return datetime.now(timezone.utc)
@@ -645,16 +640,23 @@ jobs:
                           print(f"Model drift detected: Accuracy difference of {accuracy_diff:.4f}")
                           return True
                       
-                      # Check if last training was more than 7 days ago
-                      last_training = parse_timestamp(historical_metrics[0]["created_at"])
-                      current_time = datetime.now(timezone.utc)
-                      
-                      print(f"Last training: {last_training}")
-                      print(f"Current time: {current_time}")
-                      
-                      if (current_time - last_training) > timedelta(days=7):
-                          print("Weekly retraining triggered")
-                          return True
+                      try:
+                          # Check if last training was more than 7 days ago
+                          last_training = parse_timestamp(historical_metrics[0]["created_at"])
+                          current_time = datetime.now(timezone.utc)
+                          
+                          print(f"Last training (UTC): {last_training}")
+                          print(f"Current time (UTC): {current_time}")
+                          
+                          time_diff = current_time - last_training
+                          print(f"Time difference: {time_diff.days} days")
+                          
+                          if time_diff > timedelta(days=7):
+                              print("Weekly retraining triggered")
+                              return True
+                      except Exception as e:
+                          print(f"⚠️ Error comparing timestamps: {e}")
+                          return False
                       
                       return False
 
