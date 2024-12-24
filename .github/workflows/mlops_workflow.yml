@@ -411,7 +411,83 @@ jobs:
                   git commit -m "feat(data): Track dataset with DVC"
 
             - name: Push dataset to DVC remote
-              run: dvc push
+              run: |
+                  echo "🔄 Starting DVC push..."
+
+                  # Get list of files to be pushed
+                  echo "📦 Files to be pushed:"
+                  dvc status --cloud
+
+                  # Get start time
+                  start_time=$(date +%s)
+
+                  # Run DVC push with progress
+                  dvc push -v
+
+                  # Calculate duration
+                  end_time=$(date +%s)
+                  duration=$((end_time - start_time))
+
+                  echo "✅ DVC push completed in ${duration} seconds"
+
+                  # Log the latest pushed files
+                  echo "📝 Latest pushed files:"
+                  dvc list --dvc-only --recursive .
+
+                  # Create summary for Loki
+                  python - << EOF
+                  import requests
+                  import json
+                  import time
+                  import os
+                  from datetime import datetime
+
+                  def send_dvc_log(files_info):
+                      timestamp = int(time.time() * 1e9)
+                      payload = {
+                          "streams": [{
+                              "stream": {
+                                  "job": "mlops_training",
+                                  "environment": "github_actions",
+                                  "component": "dvc_tracking",
+                                  "level": "info"
+                              },
+                              "values": [
+                                  [str(timestamp), json.dumps({
+                                      "message": "DVC Push Summary",
+                                      "files": files_info,
+                                      "push_duration": ${duration},
+                                      "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                  })]
+                              ]
+                          }]
+                      }
+                      
+                      try:
+                          response = requests.post(
+                              f"{os.environ['LOKI_URL']}/loki/api/v1/push",
+                              json=payload,
+                              auth=(os.environ['LOKI_USERNAME'], os.environ['LOKI_API_KEY']),
+                              headers={"Content-Type": "application/json"}
+                          )
+                          if response.status_code == 204:
+                              print("✅ DVC push log sent to Loki")
+                          else:
+                              print(f"❌ Failed to send DVC push log: {response.text}")
+                      except Exception as e:
+                          print(f"❌ Error sending DVC push log: {e}")
+
+                  # Get list of tracked files
+                  import subprocess
+                  result = subprocess.run(['dvc', 'list', '--dvc-only', '--recursive', '.'], 
+                                        capture_output=True, text=True)
+                  files = result.stdout.strip().split('\n')
+
+                  send_dvc_log(files)
+
+                  print("\n📊 To view DVC push logs in Grafana, use this query:")
+                  print('   {job="mlops_training", component="dvc_tracking"} | json')
+                  EOF
 
             # Model Performance Tracking
             - name: Setup MLflow for Model Comparison
@@ -431,21 +507,36 @@ jobs:
 
                   # Get latest model metrics
                   client = mlflow.tracking.MlflowClient()
-                  latest_run = client.search_runs(
+                  runs = client.search_runs(
                       experiment_ids=["1"],
                       order_by=["start_time DESC"],
                       max_results=1
-                  )[0]
+                  )
 
-                  # Save metrics for comparison
+                  # Initialize default metrics
                   metrics = {
-                      "accuracy": latest_run.data.metrics.get("test_accuracy", 0),
-                      "loss": latest_run.data.metrics.get("test_loss", 0),
+                      "accuracy": 0,
+                      "loss": 0,
                       "timestamp": datetime.now().isoformat()
                   }
 
+                  # Update metrics if runs exist
+                  if runs:
+                      latest_run = runs[0]
+                      metrics.update({
+                          "accuracy": latest_run.data.metrics.get("test_accuracy", 0),
+                          "loss": latest_run.data.metrics.get("test_loss", 0),
+                          "timestamp": datetime.now().isoformat()
+                      })
+                      print(f"✅ Found latest run with accuracy: {metrics['accuracy']}")
+                  else:
+                      print("⚠️ No previous runs found, using default metrics")
+
+                  # Save metrics for comparison
                   with open("model_metrics.json", "w") as f:
                       json.dump(metrics, f)
+
+                  print("📊 Metrics saved to model_metrics.json")
                   EOF
 
             # Model Drift Detection
