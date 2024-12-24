@@ -566,62 +566,109 @@ jobs:
 
     # Step 2: Model Training (Conditional)
     train_and_evaluate:
+        needs: data_versioning
+        if: needs.data_versioning.outputs.retrain == 'true' || github.event_name == 'push'
         runs-on: ubuntu-latest
-        container:
-            image: python:3.9-slim
-
         steps:
-            - uses: actions/checkout@v2
+            - name: Checkout repository
+              uses: actions/checkout@v2
 
-            - name: Install system dependencies
-              run: |
-                  apt-get update
-                  apt-get install -y --no-install-recommends \
-                    build-essential \
-                    curl \
-                    git \
-                    libgl1-mesa-glx \
-                    libglib2.0-0
-
-            - name: Install Python dependencies
-              run: |
-                  python -m pip install --upgrade pip
-                  pip install virtualenv
-                  python -m virtualenv venv
-                  . venv/bin/activate
-                  pip install -r requirements.txt
-                  pip install matplotlib seaborn scikit-learn
-
-            - name: Train model
-              env:
-                  DAGSHUB_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
-                  DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
-                  MLFLOW_TRACKING_URI: "https://dagshub.com/salsazufar/project-akhir-mlops.mlflow"
-                  SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-                  SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-              run: |
-                  . venv/bin/activate
-                  python script/train.py
-
-            - name: Run evaluation
-              env:
-                  DAGSHUB_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
-                  DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
-                  MLFLOW_TRACKING_URI: "https://dagshub.com/salsazufar/project-akhir-mlops.mlflow"
-                  SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-                  SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-              run: |
-                  . venv/bin/activate
-                  python script/test.py
-
-            - name: Save model artifacts
-              uses: actions/upload-artifact@v2
+            - name: Log in to Docker Hub
+              uses: docker/login-action@v2
               with:
-                  name: model-artifacts
-                  path: |
-                      model/
-                      *.png
-                      *.json
+                  username: ${{ secrets.DOCKER_USERNAME }}
+                  password: ${{ secrets.DOCKER_PASSWORD }}
+
+            # Tambahkan langkah untuk menginstall matplotlib dan dependencies lainnya
+            - name: Install additional dependencies
+              run: |
+                  pip install matplotlib seaborn scikit-learn pandas numpy
+
+            - name: Build Dependencies Image
+              run: |
+                  docker build -t ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest .
+                  docker push ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest
+
+            - name: Install Prometheus Dependencies
+              run: |
+                  sudo apt-get update && sudo apt-get install -y python3-pip
+                  sudo apt-get install -y protobuf-compiler
+                  pip3 install prometheus-client requests python-snappy protobuf supabase==1.0.3
+
+                  # Setup Prometheus proto file
+                  cat > remote_write.proto << EOF
+                  syntax = "proto3";
+                  package prometheus;
+
+                  option go_package = "prompb";
+
+                  message WriteRequest {
+                    repeated TimeSeries timeseries = 1;
+                  }
+
+                  message TimeSeries {
+                    repeated Label labels = 1;
+                    repeated Sample samples = 2;
+                  }
+
+                  message Label {
+                    string name = 1;
+                    string value = 2;
+                  }
+
+                  message Sample {
+                    double value = 1;
+                    int64 timestamp = 2;
+                  }
+                  EOF
+
+                  protoc --python_out=script/ remote_write.proto
+
+            - name: Train and Evaluate Model
+              env:
+                  DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+                  DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+                  SUPABASE_S3_ACCESS_KEY_ID: ${{ secrets.SUPABASE_S3_ACCESS_KEY_ID }}
+                  SUPABASE_S3_SECRET_ACCESS_KEY: ${{ secrets.SUPABASE_S3_SECRET_ACCESS_KEY }}
+                  DAGSHUB_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
+                  DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
+                  PROMETHEUS_API_KEY: ${{ secrets.PROMETHEUS_API_KEY }}
+                  LOKI_API_KEY: ${{ secrets.LOKI_API_KEY }}
+                  PROMETHEUS_USERNAME: "1902030"
+                  LOKI_USERNAME: "1050298"
+                  PROMETHEUS_REMOTE_WRITE_URL: ${{ secrets.PROMETHEUS_REMOTE_WRITE_URL }}
+                  LOKI_URL: ${{ secrets.LOKI_URL }}
+                  MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+                  SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+                  SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+              run: |
+                  docker run \
+                      -e DOCKER_USERNAME="$DOCKER_USERNAME" \
+                      -e DOCKER_PASSWORD="$DOCKER_PASSWORD" \
+                      -e SUPABASE_S3_ACCESS_KEY_ID="$SUPABASE_S3_ACCESS_KEY_ID" \
+                      -e SUPABASE_S3_SECRET_ACCESS_KEY="$SUPABASE_S3_SECRET_ACCESS_KEY" \
+                      -e DAGSHUB_USERNAME="$DAGSHUB_USERNAME" \
+                      -e DAGSHUB_TOKEN="$DAGSHUB_TOKEN" \
+                      -e PROMETHEUS_API_KEY="$PROMETHEUS_API_KEY" \
+                      -e LOKI_API_KEY="$LOKI_API_KEY" \
+                      -e PROMETHEUS_USERNAME="$PROMETHEUS_USERNAME" \
+                      -e LOKI_USERNAME="$LOKI_USERNAME" \
+                      -e PROMETHEUS_REMOTE_WRITE_URL="$PROMETHEUS_REMOTE_WRITE_URL" \
+                      -e LOKI_URL="$LOKI_URL" \
+                      -e MLFLOW_TRACKING_URI="$MLFLOW_TRACKING_URI" \
+                      -e SUPABASE_URL="$SUPABASE_URL" \
+                      -e SUPABASE_KEY="$SUPABASE_KEY" \
+                      -v ${{ github.workspace }}:/app \
+                      -w /app \
+                      --network host \
+                      ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest \
+                      bash -c "
+                        echo 'Installing additional dependencies...' &&
+                        pip install supabase==1.0.3 &&
+                        echo 'Starting training...' &&
+                        python script/train.py &&
+                        python script/test.py
+                      "
 
     # Step 3: Build and Push Final Docker Image with Model
     build_and_push_docker:
