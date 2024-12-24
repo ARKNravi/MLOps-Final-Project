@@ -585,6 +585,7 @@ jobs:
                   pip install matplotlib seaborn scikit-learn pandas numpy mlflow
                   pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
                   pip install supabase==2.3.0
+                  pip install python-snappy  # Tambahkan ini untuk mengatasi error snappy
 
             - name: Build Dependencies Image
               run: |
@@ -593,7 +594,7 @@ jobs:
 
             - name: Install Prometheus Dependencies
               run: |
-                  sudo apt-get update && sudo apt-get install -y python3-pip
+                  sudo apt-get update && sudo apt-get install -y python3-pip python-snappy
                   sudo apt-get install -y protobuf-compiler
                   pip3 install prometheus-client requests python-snappy protobuf supabase==2.3.0 mlflow
 

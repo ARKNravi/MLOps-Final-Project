@@ -7,6 +7,8 @@ RUN apt-get update && apt-get install -y \
     curl \
     gcc \
     g++ \
+    python3-dev \
+    libsnappy-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Set the working directory
@@ -32,7 +34,12 @@ RUN pip install --no-cache-dir \
     scikit-learn \
     pandas \
     numpy \
-    mlflow
+    mlflow \
+    python-snappy \
+    prometheus-client \
+    requests \
+    protobuf \
+    dvclive
 
 # Copy the rest of the application
 COPY . .
