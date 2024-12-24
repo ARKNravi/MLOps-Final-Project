@@ -512,36 +512,15 @@ jobs:
                   )
 
                   def get_latest_metrics():
-                      # Try to get metrics from MLflow first
-                      client = mlflow.tracking.MlflowClient()
-                      runs = client.search_runs(
-                          experiment_ids=["1"],
-                          order_by=["start_time DESC"],
-                          max_results=1
-                      )
-                      
-                      if runs:
-                          latest_run = runs[0]
-                          metrics = {
-                              "accuracy": latest_run.data.metrics.get("test_accuracy", 0),
-                              "loss": latest_run.data.metrics.get("test_loss", 0),
-                              "timestamp": datetime.now().isoformat(),
-                              "source": "mlflow"
-                          }
-                          print("✅ Found metrics from MLflow")
-                          return metrics
-                      
-                      # If no MLflow runs, try Supabase
                       try:
                           response = supabase.table('model_metrics').select("*").order('created_at', desc=True).limit(1).execute()
                           if response.data:
                               metrics = response.data[0]
                               print("✅ Found metrics from Supabase")
                               return {
-                                  "accuracy": metrics.get("accuracy", 0),
-                                  "loss": metrics.get("loss", 0),
-                                  "timestamp": metrics.get("created_at"),
-                                  "source": "supabase"
+                                  "accuracy": metrics["accuracy"],
+                                  "loss": metrics["loss"],
+                                  "timestamp": metrics["created_at"]
                               }
                       except Exception as e:
                           print(f"⚠️ Error accessing Supabase: {e}")
@@ -550,113 +529,29 @@ jobs:
                       print("⚠️ No previous metrics found, using defaults")
                       return {
                           "accuracy": 0,
-                          "loss": 0,
-                          "timestamp": datetime.now().isoformat(),
-                          "source": "default"
+                          "loss": float('inf'),
+                          "timestamp": datetime.now().isoformat()
                       }
 
-                  # Get metrics and save to both storages
-                  metrics = get_latest_metrics()
-
-                  # Save to Supabase for history
-                  try:
-                      supabase.table('model_metrics').insert({
-                          "accuracy": metrics["accuracy"],
-                          "loss": metrics["loss"],
-                          "created_at": datetime.now().isoformat(),
-                          "source": metrics["source"]
-                      }).execute()
-                      print("✅ Metrics saved to Supabase")
-                  except Exception as e:
-                      print(f"⚠️ Error saving to Supabase: {e}")
-
-                  # Save locally for next steps
-                  with open("model_metrics.json", "w") as f:
-                      json.dump(metrics, f)
-                  print("📊 Metrics saved locally")
-
-                  # Print metrics source and values
-                  print(f"\n📈 Metrics Summary:")
-                  print(f"Source: {metrics['source']}")
-                  print(f"Accuracy: {metrics['accuracy']:.4f}")
-                  print(f"Loss: {metrics['loss']:.4f}")
-                  print(f"Timestamp: {metrics['timestamp']}")
-                  EOF
-
-            # Model Drift Detection
-            - name: Check Model Drift
-              env:
-                  SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-                  SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-              run: |
-                  python - << EOF
-                  import json
-                  import os
-                  from datetime import datetime, timedelta, timezone
-                  from supabase import create_client, Client
-
-                  def get_historical_metrics():
-                      supabase = create_client(
-                          os.environ.get("SUPABASE_URL"),
-                          os.environ.get("SUPABASE_KEY")
-                      )
+                  def should_retrain(current_metrics, threshold=0.05):
+                      # Get latest metrics
+                      latest = get_latest_metrics()
                       
-                      try:
-                          response = supabase.table('model_metrics').select("*").order('created_at', desc=True).limit(5).execute()
-                          if response.data:
-                              return response.data
-                          return []
-                      except Exception as e:
-                          print(f"⚠️ Error getting historical metrics: {e}")
-                          return []
-
-                  def parse_timestamp(ts_str):
-                      try:
-                          # Handle various timestamp formats
-                          if isinstance(ts_str, (int, float)):
-                              # Convert Unix timestamp to datetime
-                              return datetime.fromtimestamp(ts_str, tz=timezone.utc)
-                          
-                          # Convert string to datetime with UTC timezone
-                          dt = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
-                          if dt.tzinfo is None:
-                              dt = dt.replace(tzinfo=timezone.utc)
-                          return dt
-                      except Exception as e:
-                          print(f"⚠️ Error parsing timestamp {ts_str}: {e}")
-                          return datetime.now(timezone.utc)
-
-                  def should_retrain(current_metrics, historical_metrics, threshold=0.05):
-                      if not historical_metrics:
-                          print("No historical metrics found")
-                          return False
-                      
-                      # Get average accuracy from historical data
-                      historical_accuracy = sum(m["accuracy"] for m in historical_metrics) / len(historical_metrics)
-                      current_accuracy = current_metrics["accuracy"]
-                      
-                      accuracy_diff = abs(current_accuracy - historical_accuracy)
-                      if accuracy_diff > threshold:
-                          print(f"Model drift detected: Accuracy difference of {accuracy_diff:.4f}")
-                          return True
-                      
-                      try:
-                          # Check if last training was more than 7 days ago
-                          last_training = parse_timestamp(historical_metrics[0]["created_at"])
-                          current_time = datetime.now(timezone.utc)
-                          
-                          print(f"Last training (UTC): {last_training}")
-                          print(f"Current time (UTC): {current_time}")
-                          
-                          time_diff = current_time - last_training
-                          print(f"Time difference: {time_diff.days} days")
-                          
-                          if time_diff > timedelta(days=7):
-                              print("Weekly retraining triggered")
+                      # Check if accuracy has decreased significantly
+                      if latest["accuracy"] > 0:  # if we have previous metrics
+                          accuracy_diff = abs(current_metrics["accuracy"] - latest["accuracy"])
+                          if accuracy_diff > threshold:
+                              print(f"Model drift detected: Accuracy difference of {accuracy_diff:.4f}")
                               return True
-                      except Exception as e:
-                          print(f"⚠️ Error comparing timestamps: {e}")
-                          return False
+                      
+                      # Check time since last training
+                      last_training = parse_timestamp(latest["timestamp"])
+                      current_time = datetime.now(timezone.utc)
+                      time_diff = current_time - last_training
+                      
+                      if time_diff > timedelta(days=7):
+                          print("Weekly retraining triggered")
+                          return True
                       
                       return False
 
@@ -664,19 +559,18 @@ jobs:
                   with open("model_metrics.json", "r") as f:
                       current_metrics = json.load(f)
 
-                  # Get historical metrics
-                  historical_metrics = get_historical_metrics()
-
                   # Check if retraining needed
-                  retrain = should_retrain(current_metrics, historical_metrics)
+                  retrain = should_retrain(current_metrics)
 
                   # Save decision
                   with open("retrain.txt", "w") as f:
                       f.write("true" if retrain else "false")
 
                   print(f"\n🔄 Retraining decision: {'Yes' if retrain else 'No'}")
-                  if historical_metrics:
-                      print(f"Historical metrics available: {len(historical_metrics)} records")
+                  if retrain:
+                      print(f"Model drift detected. Retraining needed.")
+                  else:
+                      print(f"No model drift detected. Retraining not needed.")
                   EOF
 
             - name: Trigger Retraining if Needed
