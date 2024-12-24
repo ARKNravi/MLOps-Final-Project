@@ -22,6 +22,9 @@ env:
     PROMETHEUS_API_KEY: ${{ secrets.PROMETHEUS_API_KEY }}
     PROMETHEUS_USERNAME: "1902030"
     PROMETHEUS_REMOTE_WRITE_URL: ${{ secrets.PROMETHEUS_REMOTE_WRITE_URL }}
+    LOKI_API_KEY: ${{ secrets.GRAFANA_CLOUD_API_KEY }}
+    LOKI_USERNAME: "1050298"
+    LOKI_URL: "https://logs-prod-012.grafana.net"
 
 jobs:
     data-versioning-and-drift:
