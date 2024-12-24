@@ -390,11 +390,17 @@ jobs:
                   dvc init --no-scm
 
                   echo "⚙️ Configuring DVC remote storage..."
-                  dvc remote add -d storage s3://zyzahbhyrgrsakuwwdjr/mlops-data
+                  # Update bucket name to mlops_workflow
+                  dvc remote add -d storage s3://mlops_workflow/mlops-data
                   dvc remote modify storage endpointurl https://zyzahbhyrgrsakuwwdjr.supabase.co/storage/v1/s3
                   dvc remote modify storage access_key_id ${SUPABASE_S3_ACCESS_KEY_ID}
                   dvc remote modify storage secret_access_key ${SUPABASE_S3_SECRET_ACCESS_KEY}
                   dvc remote modify storage region ap-southeast-1
+
+                  echo "📝 DVC configuration:"
+                  dvc remote list
+                  dvc remote modify storage --local access_key_id ${SUPABASE_S3_ACCESS_KEY_ID}
+                  dvc remote modify storage --local secret_access_key ${SUPABASE_S3_SECRET_ACCESS_KEY}
 
             - name: Track dataset with DVC
               run: |
