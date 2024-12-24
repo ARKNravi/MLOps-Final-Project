@@ -187,24 +187,103 @@ jobs:
                   LOKI_USERNAME: "1050298"
                   LOKI_URL: ${{ secrets.LOKI_URL }}
               run: |
-                  # Mengirim log test ke Loki
-                  curl -v -X POST "${LOKI_URL}/loki/api/v1/push" \
-                    -H "Content-Type: application/json" \
-                    -u "${LOKI_USERNAME}:${LOKI_API_KEY}" \
-                    --data-raw '{
-                      "streams": [
-                        {
-                          "stream": {
-                            "job": "mlops_training",
-                            "environment": "github_actions",
-                            "test": "true"
-                          },
-                          "values": [
-                            ["'$(date +%s)000000000'", "Test log message from GitHub Actions"]
-                          ]
-                        }
+                  # Install Python dan dependencies
+                  sudo apt-get update && sudo apt-get install -y python3-pip
+                  pip3 install requests
+
+                  # Buat script Python untuk test Loki
+                  cat > test_loki.py << EOF
+                  import os
+                  import requests
+                  import json
+                  import time
+                  from datetime import datetime
+
+                  def test_loki_connection():
+                      # Test basic connection
+                      url = f"{os.environ['LOKI_URL']}/ready"
+                      try:
+                          response = requests.get(url)
+                          print(f"Loki readiness check: {response.status_code}")
+                      except Exception as e:
+                          print(f"Error checking Loki readiness: {e}")
+                          return False
+
+                      return True
+
+                  def send_test_logs():
+                      timestamp = int(time.time() * 1e9)
+                      current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                      
+                      # Different log levels for testing
+                      test_logs = [
+                          {"level": "info", "message": "Test log message - INFO"},
+                          {"level": "warning", "message": "Test log message - WARNING"},
+                          {"level": "error", "message": "Test log message - ERROR"},
+                          {"level": "debug", "message": "Test log message - DEBUG"}
                       ]
-                    }'
+                      
+                      for log in test_logs:
+                          payload = {
+                              "streams": [{
+                                  "stream": {
+                                      "job": "mlops_training",
+                                      "environment": "github_actions",
+                                      "level": log["level"],
+                                      "test": "true"
+                                  },
+                                  "values": [
+                                      [str(timestamp), json.dumps({
+                                          "message": log["message"],
+                                          "timestamp": current_time,
+                                          "test_type": "loki_connection_test"
+                                      })]
+                                  ]
+                              }]
+                          }
+                          
+                          try:
+                              response = requests.post(
+                                  f"{os.environ['LOKI_URL']}/loki/api/v1/push",
+                                  json=payload,
+                                  auth=(os.environ['LOKI_USERNAME'], os.environ['LOKI_API_KEY']),
+                                  headers={"Content-Type": "application/json"}
+                              )
+                              print(f"Sending {log['level']} log: {response.status_code}")
+                              if response.status_code != 204:
+                                  print(f"Error response: {response.text}")
+                          except Exception as e:
+                              print(f"Error sending log: {e}")
+                              return False
+                      
+                      return True
+
+                  if __name__ == "__main__":
+                      print("Testing Loki connection...")
+                      if test_loki_connection():
+                          print("Loki connection test passed")
+                          print("Sending test logs...")
+                          if send_test_logs():
+                              print("✅ All test logs sent successfully")
+                              print("To verify logs in Grafana Loki, use these LogQL queries:")
+                              print("1. All test logs:")
+                              print('   {job="mlops_training", test="true"}')
+                              print("2. Filter by level:")
+                              print('   {job="mlops_training", test="true", level="error"}')
+                              print('   {job="mlops_training", test="true", level="warning"}')
+                              print('   {job="mlops_training", test="true", level="info"}')
+                              print("3. Search for test messages:")
+                              print('   {job="mlops_training", test="true"} |= "Test log message"')
+                          else:
+                              print("❌ Failed to send test logs")
+                              exit(1)
+                      else:
+                          print("❌ Loki connection test failed")
+                          exit(1)
+                  EOF
+
+                  # Jalankan test
+                  python3 test_loki.py
 
     # Step 1: Build Base Image with Dependencies
     build_and_cache_dependencies:
