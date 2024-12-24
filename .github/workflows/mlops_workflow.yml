@@ -448,6 +448,14 @@ jobs:
 
                   def send_dvc_log(files_info):
                       timestamp = int(time.time() * 1e9)
+                      
+                      # Limit the files info to just the count and first few files
+                      files_summary = {
+                          "total_files": len(files_info),
+                          "sample_files": files_info[:5] if files_info else [],
+                          "file_count": len(files_info)
+                      }
+                      
                       payload = {
                           "streams": [{
                               "stream": {
@@ -459,7 +467,7 @@ jobs:
                               "values": [
                                   [str(timestamp), json.dumps({
                                       "message": "DVC Push Summary",
-                                      "files": files_info,
+                                      "files_summary": files_summary,
                                       "push_duration": ${duration},
                                       "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                                   })]
@@ -476,6 +484,11 @@ jobs:
                           )
                           if response.status_code == 204:
                               print("✅ DVC push log sent to Loki")
+                              print(f"📁 Total files tracked: {files_summary['total_files']}")
+                              if files_summary['sample_files']:
+                                  print("\n📝 Sample of tracked files:")
+                                  for file in files_summary['sample_files']:
+                                      print(f"   - {file}")
                           else:
                               print(f"❌ Failed to send DVC push log: {response.text}")
                       except Exception as e:
@@ -485,12 +498,13 @@ jobs:
                   import subprocess
                   result = subprocess.run(['dvc', 'list', '--dvc-only', '--recursive', '.'], 
                                         capture_output=True, text=True)
-                  files = result.stdout.strip().split('\n')
+                  files = [f for f in result.stdout.strip().split('\n') if f]  # Remove empty lines
 
                   send_dvc_log(files)
 
-                  print("\n📊 To view DVC push logs in Grafana, use this query:")
+                  print("\n📊 To view DVC push logs in Grafana, use these queries:")
                   print('   {job="mlops_training", component="dvc_tracking"} | json')
+                  print('   {job="mlops_training", component="dvc_tracking"} | json | total_files > 0')
                   EOF
 
             # Model Performance Tracking
