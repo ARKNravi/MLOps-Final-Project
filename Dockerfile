@@ -18,18 +18,21 @@ COPY requirements.txt .
 # Install Python dependencies with specific flags
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install additional dependencies
+# Install PyTorch dependencies
 RUN pip install --no-cache-dir \
-    supabase==1.0.3 \
+    torch \
+    torchvision \
+    --index-url https://download.pytorch.org/whl/cpu
+
+# Install other dependencies
+RUN pip install --no-cache-dir \
+    supabase==2.3.0 \
     matplotlib \
     seaborn \
     scikit-learn \
     pandas \
     numpy \
-    mlflow \
-    torch \
-    torchvision \
-    --index-url https://download.pytorch.org/whl/cpu
+    mlflow
 
 # Copy the rest of the application
 COPY . .

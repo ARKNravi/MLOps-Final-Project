@@ -582,7 +582,9 @@ jobs:
             # Install semua dependencies yang diperlukan
             - name: Install additional dependencies
               run: |
-                  pip install matplotlib seaborn scikit-learn pandas numpy mlflow torch torchvision
+                  pip install matplotlib seaborn scikit-learn pandas numpy mlflow
+                  pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+                  pip install supabase==2.3.0
 
             - name: Build Dependencies Image
               run: |
@@ -593,7 +595,7 @@ jobs:
               run: |
                   sudo apt-get update && sudo apt-get install -y python3-pip
                   sudo apt-get install -y protobuf-compiler
-                  pip3 install prometheus-client requests python-snappy protobuf supabase==1.0.3 mlflow
+                  pip3 install prometheus-client requests python-snappy protobuf supabase==2.3.0 mlflow
 
                   # Setup Prometheus proto file
                   cat > remote_write.proto << EOF
