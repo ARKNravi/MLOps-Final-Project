@@ -79,6 +79,11 @@ def log_confusion_matrix(y_true, y_pred, class_names):
 def computeTestSetAccuracyAndLogConfusionMatrix(model, criterion, dataloader, class_names):
     test_loss, test_corrects = 0.0, 0
     y_true, y_pred = [], []
+    
+    # Set debug mode for quick testing
+    debug_mode = True  # Force debug mode to be True
+    print("🔧 Running in debug mode: 10 batches only")
+    max_batches = 10  # Force 10 batches
 
     with start_run():  # Start an MLflow run
         # Log testing parameters (to match training phase logs)
@@ -87,7 +92,10 @@ def computeTestSetAccuracyAndLogConfusionMatrix(model, criterion, dataloader, cl
         mlflow.log_param("dataset_size", len(dataloader.dataset))
 
         with torch.no_grad():
-            for inputs, labels in dataloader:
+            for i, (inputs, labels) in enumerate(dataloader):
+                if debug_mode and i >= max_batches:
+                    break
+                
                 inputs, labels = inputs.to(device), labels.to(device)
                 outputs = model(inputs)
 
@@ -253,12 +261,9 @@ def log_to_grafana(metric_name, value, labels=None):
 
 def test_model(model, test_loader, criterion, device):
     # Set debug mode for quick testing
-    debug_mode = True  # Set to True for quick testing
-    if debug_mode:
-        print("🔧 Running in debug mode: 10 batches only")
-        max_batches = 10
-    else:
-        max_batches = float('inf')
+    debug_mode = True  # Force debug mode to be True
+    print("🔧 Running in debug mode: 10 batches only")
+    max_batches = 10  # Force 10 batches
     
     model.eval()
     test_loss = 0

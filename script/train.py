@@ -226,22 +226,18 @@ def send_log_to_loki(log_message, log_level="info", labels=None, numeric_values=
 # Training function
 def train_model(model, train_loader, val_loader, criterion, optimizer, num_epochs, device):
     # Set debug mode for quick training
-    debug_mode = True  # Set to True for quick training
+    debug_mode = True  # Force debug mode to be True
+    print("🔧 Running in debug mode: 1 epoch, 10 batches only")
+    num_epochs = 1  # Force 1 epoch
+    max_batches = 10  # Force 10 batches
     
-    if debug_mode:
-        print("🔧 Running in debug mode: 1 epoch, 10 batches only")
-        num_epochs = 1
-        max_batches = 10
-    else:
-        max_batches = float('inf')
-        
     best_val_loss = float('inf')
     train_losses = []
     val_losses = []
-
-        for epoch in range(num_epochs):
-                    model.train()
-                running_loss = 0.0
+    
+    for epoch in range(num_epochs):
+        model.train()
+        running_loss = 0.0
         batch_count = 0
         
         print(f"\ntrain phase:")
@@ -251,12 +247,12 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
                 
             images, labels = images.to(device), labels.to(device)
             
-                    optimizer.zero_grad()
+            optimizer.zero_grad()
             outputs = model(images)
-                        loss = criterion(outputs, labels)
-                            loss.backward()
-                            optimizer.step()
-
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
+            
             running_loss += loss.item()
             batch_count += 1
             
