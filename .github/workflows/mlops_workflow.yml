@@ -499,93 +499,167 @@ jobs:
                   MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
                   DAGSHUB_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
                   DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
+                  SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+                  SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
               run: |
-                  pip install mlflow scikit-learn
+                  pip install mlflow scikit-learn pandas numpy requests supabase
                   python - << EOF
                   import mlflow
                   import json
+                  import pandas as pd
                   from datetime import datetime
+                  import os
+                  from supabase import create_client, Client
 
                   # Set MLflow tracking URI
-                  mlflow.set_tracking_uri("$MLFLOW_TRACKING_URI")
+                  mlflow.set_tracking_uri(os.environ['MLFLOW_TRACKING_URI'])
+                  print(f"MLflow tracking URI: {mlflow.get_tracking_uri()}")
 
-                  # Get latest model metrics
-                  client = mlflow.tracking.MlflowClient()
-                  runs = client.search_runs(
-                      experiment_ids=["1"],
-                      order_by=["start_time DESC"],
-                      max_results=1
+                  # Initialize Supabase client
+                  supabase: Client = create_client(
+                      os.environ.get("SUPABASE_URL"),
+                      os.environ.get("SUPABASE_KEY")
                   )
 
-                  # Initialize default metrics
-                  metrics = {
-                      "accuracy": 0,
-                      "loss": 0,
-                      "timestamp": datetime.now().isoformat()
-                  }
+                  def get_latest_metrics():
+                      # Try to get metrics from MLflow first
+                      client = mlflow.tracking.MlflowClient()
+                      runs = client.search_runs(
+                          experiment_ids=["1"],
+                          order_by=["start_time DESC"],
+                          max_results=1
+                      )
+                      
+                      if runs:
+                          latest_run = runs[0]
+                          metrics = {
+                              "accuracy": latest_run.data.metrics.get("test_accuracy", 0),
+                              "loss": latest_run.data.metrics.get("test_loss", 0),
+                              "timestamp": datetime.now().isoformat(),
+                              "source": "mlflow"
+                          }
+                          print("✅ Found metrics from MLflow")
+                          return metrics
+                      
+                      # If no MLflow runs, try Supabase
+                      try:
+                          response = supabase.table('model_metrics').select("*").order('created_at', desc=True).limit(1).execute()
+                          if response.data:
+                              metrics = response.data[0]
+                              print("✅ Found metrics from Supabase")
+                              return {
+                                  "accuracy": metrics.get("accuracy", 0),
+                                  "loss": metrics.get("loss", 0),
+                                  "timestamp": metrics.get("created_at"),
+                                  "source": "supabase"
+                              }
+                      except Exception as e:
+                          print(f"⚠️ Error accessing Supabase: {e}")
+                      
+                      # Default metrics if nothing found
+                      print("⚠️ No previous metrics found, using defaults")
+                      return {
+                          "accuracy": 0,
+                          "loss": 0,
+                          "timestamp": datetime.now().isoformat(),
+                          "source": "default"
+                      }
 
-                  # Update metrics if runs exist
-                  if runs:
-                      latest_run = runs[0]
-                      metrics.update({
-                          "accuracy": latest_run.data.metrics.get("test_accuracy", 0),
-                          "loss": latest_run.data.metrics.get("test_loss", 0),
-                          "timestamp": datetime.now().isoformat()
-                      })
-                      print(f"✅ Found latest run with accuracy: {metrics['accuracy']}")
-                  else:
-                      print("⚠️ No previous runs found, using default metrics")
+                  # Get metrics and save to both storages
+                  metrics = get_latest_metrics()
 
-                  # Save metrics for comparison
+                  # Save to Supabase for history
+                  try:
+                      supabase.table('model_metrics').insert({
+                          "accuracy": metrics["accuracy"],
+                          "loss": metrics["loss"],
+                          "created_at": datetime.now().isoformat(),
+                          "source": metrics["source"]
+                      }).execute()
+                      print("✅ Metrics saved to Supabase")
+                  except Exception as e:
+                      print(f"⚠️ Error saving to Supabase: {e}")
+
+                  # Save locally for next steps
                   with open("model_metrics.json", "w") as f:
                       json.dump(metrics, f)
+                  print("📊 Metrics saved locally")
 
-                  print("📊 Metrics saved to model_metrics.json")
+                  # Print metrics source and values
+                  print(f"\n📈 Metrics Summary:")
+                  print(f"Source: {metrics['source']}")
+                  print(f"Accuracy: {metrics['accuracy']:.4f}")
+                  print(f"Loss: {metrics['loss']:.4f}")
+                  print(f"Timestamp: {metrics['timestamp']}")
                   EOF
 
             # Model Drift Detection
             - name: Check Model Drift
+              env:
+                  SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+                  SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
               run: |
                   python - << EOF
                   import json
                   import os
                   from datetime import datetime, timedelta
+                  from supabase import create_client, Client
 
-                  def should_retrain(current_metrics, threshold=0.05):
+                  def get_historical_metrics():
+                      supabase = create_client(
+                          os.environ.get("SUPABASE_URL"),
+                          os.environ.get("SUPABASE_KEY")
+                      )
+                      
                       try:
-                          with open("previous_metrics.json", "r") as f:
-                              previous_metrics = json.load(f)
-                              
-                          accuracy_diff = abs(current_metrics["accuracy"] - previous_metrics["accuracy"])
-                          if accuracy_diff > threshold:
-                              print(f"Model drift detected: Accuracy difference of {accuracy_diff}")
-                              return True
-                              
-                          prev_time = datetime.fromisoformat(previous_metrics["timestamp"])
-                          current_time = datetime.fromisoformat(current_metrics["timestamp"])
-                          if (current_time - prev_time) > timedelta(days=7):
-                              print("Weekly retraining triggered")
-                              return True
-                              
-                          return False
-                          
-                      except FileNotFoundError:
-                          print("No previous metrics found, saving current metrics")
-                          return False
+                          # Get last 5 metrics
+                          response = supabase.table('model_metrics').select("*").order('created_at', desc=True).limit(5).execute()
+                          if response.data:
+                              return response.data
+                          return []
+                      except Exception as e:
+                          print(f"⚠️ Error getting historical metrics: {e}")
+                          return []
 
+                  def should_retrain(current_metrics, historical_metrics, threshold=0.05):
+                      if not historical_metrics:
+                          print("No historical metrics found")
+                          return False
+                      
+                      # Get average accuracy from historical data
+                      historical_accuracy = sum(m["accuracy"] for m in historical_metrics) / len(historical_metrics)
+                      current_accuracy = current_metrics["accuracy"]
+                      
+                      accuracy_diff = abs(current_accuracy - historical_accuracy)
+                      if accuracy_diff > threshold:
+                          print(f"Model drift detected: Accuracy difference of {accuracy_diff:.4f}")
+                          return True
+                      
+                      # Check if last training was more than 7 days ago
+                      last_training = datetime.fromisoformat(historical_metrics[0]["created_at"].replace("Z", "+00:00"))
+                      if (datetime.now() - last_training) > timedelta(days=7):
+                          print("Weekly retraining triggered")
+                          return True
+                      
+                      return False
+
+                  # Load current metrics
                   with open("model_metrics.json", "r") as f:
                       current_metrics = json.load(f)
 
-                  if should_retrain(current_metrics):
-                      with open("retrain.txt", "w") as f:
-                          f.write("true")
-                  else:
-                      with open("retrain.txt", "w") as f:
-                          f.write("false")
+                  # Get historical metrics
+                  historical_metrics = get_historical_metrics()
 
-                  # Save current metrics as previous metrics for next comparison
-                  with open("previous_metrics.json", "w") as f:
-                      json.dump(current_metrics, f)
+                  # Check if retraining needed
+                  retrain = should_retrain(current_metrics, historical_metrics)
+
+                  # Save decision
+                  with open("retrain.txt", "w") as f:
+                      f.write("true" if retrain else "false")
+
+                  print(f"\n🔄 Retraining decision: {'Yes' if retrain else 'No'}")
+                  if historical_metrics:
+                      print(f"Historical metrics available: {len(historical_metrics)} records")
                   EOF
 
             - name: Trigger Retraining if Needed
