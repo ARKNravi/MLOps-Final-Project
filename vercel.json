@@ -3,7 +3,11 @@
     "builds": [
         {
             "src": "script/app.py",
-            "use": "@vercel/python"
+            "use": "@vercel/python",
+            "config": {
+                "maxLambdaSize": "15mb",
+                "runtime": "python3.9"
+            }
         }
     ],
     "routes": [
@@ -13,6 +17,7 @@
         }
     ],
     "env": {
-        "PYTHON_VERSION": "3.9"
+        "PYTHON_VERSION": "3.9",
+        "PIP_TARGET": ".pip"
     }
 }
