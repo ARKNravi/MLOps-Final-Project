@@ -251,6 +251,56 @@ def log_to_grafana(metric_name, value, labels=None):
         print(f"Error logging metric: {e}")
         return False
 
+def test_model(model, test_loader, criterion):
+    print("Starting model testing...")
+    
+    # Debug configuration
+    debug_config = {
+        "max_batches": 5,  # Only test 5 batches
+        "print_every": 1   # Print every batch
+    }
+    
+    model.eval()
+    test_loss = 0
+    correct = 0
+    total = 0
+    batch_count = 0
+    
+    with torch.no_grad():
+        for i, (images, labels) in enumerate(test_loader):
+            if batch_count >= debug_config["max_batches"]:
+                break
+                
+            images = images.to(device)
+            labels = labels.to(device)
+            
+            outputs = model(images)
+            loss = criterion(outputs, labels)
+            
+            test_loss += loss.item()
+            _, predicted = outputs.max(1)
+            total += labels.size(0)
+            correct += predicted.eq(labels).sum().item()
+            
+            if (i + 1) % debug_config["print_every"] == 0:
+                print(f'Batch [{i + 1}/{debug_config["max_batches"]}], '
+                      f'Loss: {loss.item():.4f}, '
+                      f'Accuracy: {100 * correct / total:.2f}%')
+                
+                # Send metrics to Prometheus
+                send_metric_to_prometheus("test_loss", loss.item())
+                send_metric_to_prometheus("test_accuracy", 100 * correct / total)
+            
+            batch_count += 1
+    
+    test_accuracy = 100 * correct / total if total > 0 else 0
+    test_loss = test_loss / batch_count if batch_count > 0 else 0
+    
+    print(f'\nTest Results:')
+    print(f'Loss: {test_loss:.4f}, Accuracy: {test_accuracy:.2f}%')
+    
+    return test_loss, test_accuracy
+
 # Run the testing phase
 if __name__ == "__main__":
     test_loss, test_accuracy = computeTestSetAccuracyAndLogConfusionMatrix(

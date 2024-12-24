@@ -757,37 +757,51 @@ jobs:
 
                   # Handle empty runs
                   if not comparison_data:
-                      report = {
-                          "best_model": {
-                              "run_id": "no_runs",
-                              "accuracy": 0,
-                              "improvement": 0
-                          },
-                          "trend": {
-                              "accuracy_trend": 0,
-                              "loss_trend": 0
-                          },
-                          "comparison": []
+                      default_metrics = {
+                          "run_id": "no_runs",
+                          "accuracy": 0,
+                          "loss": 0,
+                          "training_time": 0,
+                          "timestamp": datetime.now().timestamp() * 1000
                       }
-                  else:
-                      # Create comparison report
-                      df = pd.DataFrame(comparison_data)
-                      report = {
-                          "best_model": {
-                              "run_id": df.loc[df["accuracy"].idxmax(), "run_id"] if not df.empty else "no_runs",
-                              "accuracy": float(df["accuracy"].max()) if not df.empty else 0,
-                              "improvement": float(df["accuracy"].max() - df["accuracy"].mean()) if not df.empty else 0
-                          },
-                          "trend": {
-                              "accuracy_trend": float(df["accuracy"].diff().mean()) if not df.empty else 0,
-                              "loss_trend": float(df["loss"].diff().mean()) if not df.empty else 0
-                          },
-                          "comparison": comparison_data
-                      }
+                      comparison_data.append(default_metrics)
+
+                  # Create comparison report
+                  df = pd.DataFrame(comparison_data)
+
+                  # Safe access to DataFrame columns
+                  best_accuracy = df["accuracy"].max() if not df.empty else 0
+                  mean_accuracy = df["accuracy"].mean() if not df.empty else 0
+                  accuracy_trend = float(df["accuracy"].diff().mean()) if len(df) > 1 else 0
+                  loss_trend = float(df["loss"].diff().mean()) if len(df) > 1 else 0
+
+                  best_run_id = df.loc[df["accuracy"].idxmax(), "run_id"] if not df.empty else "no_runs"
+
+                  report = {
+                      "best_model": {
+                          "run_id": best_run_id,
+                          "accuracy": float(best_accuracy),
+                          "improvement": float(best_accuracy - mean_accuracy)
+                      },
+                      "trend": {
+                          "accuracy_trend": accuracy_trend,
+                          "loss_trend": loss_trend
+                      },
+                      "comparison": comparison_data
+                  }
 
                   # Save comparison report
                   with open("model_comparison.json", "w") as f:
                       json.dump(report, f, indent=2)
+
+                  # Log comparison to MLflow
+                  with mlflow.start_run(run_name="model_comparison"):
+                      mlflow.log_metrics({
+                          "best_accuracy": report["best_model"]["accuracy"],
+                          "accuracy_improvement": report["best_model"]["improvement"],
+                          "accuracy_trend": report["trend"]["accuracy_trend"]
+                      })
+                      mlflow.log_artifact("model_comparison.json")
 
                   # Print summary
                   print("\n📊 Model Comparison Summary:")
@@ -796,20 +810,6 @@ jobs:
                   print(f"Improvement: {report['best_model']['improvement']:.4f}")
                   print(f"Accuracy Trend: {report['trend']['accuracy_trend']:.4f}")
                   EOF
-
-            # Modify training configuration for quick testing
-            - name: Configure Quick Training
-              run: |
-                  echo '{
-                      "training": {
-                          "epochs": 1,
-                          "batch_size": 32,
-                          "test_size": 0.2,
-                          "learning_rate": 0.001,
-                          "validation_split": 0.1,
-                          "max_samples": 1000
-                      }
-                  }' > config.json
 
             - name: Perform A/B Testing Analysis
               run: |

@@ -224,266 +224,85 @@ def send_log_to_loki(log_message, log_level="info", labels=None, numeric_values=
         return False
 
 # Training function
-def train_model(model, criterion, optimizer, scheduler, num_epochs):
-    best_model_wts = copy.deepcopy(model.state_dict())
-    best_acc = 0.0
-
-    send_log_to_loki("Starting model training", "info", {"stage": "training_start"})
-    print("Starting training...")
-    print(f"Training on device: {device}")
-    print(f"Dataset sizes - Train: {dataset_sizes['train']}, Val: {dataset_sizes['val']}")
-
-    with mlflow.start_run() as run:
-        send_log_to_loki(f"MLflow run started with ID: {run.info.run_id}", "info", {"stage": "mlflow_start"})
-        print(f"MLflow run ID: {run.info.run_id}")
+def train_model(model, train_loader, val_loader, criterion, optimizer, num_epochs=1):  # Reduced epochs
+    print("train phase:")
+    
+    # Training configuration for debugging
+    debug_config = {
+        "max_batches": 5,  # Only process 5 batches per epoch
+        "print_every": 1,  # Print every batch
+        "epochs": 1  # Only run for 1 epoch
+    }
+    
+    for epoch in range(debug_config["epochs"]):
+        model.train()
+        running_loss = 0.0
+        correct = 0
+        total = 0
+        batch_count = 0
         
-        # Log hyperparameters
-        params = {
-            "batch_size": batch_size,
-            "learning_rate": learning_rate,
-            "momentum": momentum,
-            "scheduler_step_size": scheduler_step_size,
-            "scheduler_gamma": scheduler_gamma,
-            "num_epochs": num_epochs
-        }
-        mlflow.log_params(params)
-        send_log_to_loki("Hyperparameters set", "info", 
-            {"stage": "hyperparameters"}, 
-            numeric_values=params
-        )
-
-        for epoch in range(num_epochs):
-            send_log_to_loki(f"Starting epoch {epoch}/{num_epochs-1}", "info", 
-                {"stage": "epoch_start", "epoch": str(epoch)},
-                {"current_epoch": epoch, "total_epochs": num_epochs}
-            )
-            
-            print(f'\nEpoch {epoch}/{num_epochs-1}')
-            print('-' * 10)
-            epoch_start_time = time.time()
-            
-            for phase in ['train', 'val']:
-                if phase == 'train':
-                    model.train()
-                else:
-                    model.eval()
-
-                running_loss = 0.0
-                running_corrects = 0
-                batch_times = []
-
-                # Add progress tracking
-                total_batches = len(dataloaders[phase])
-                send_log_to_loki(f"Starting {phase} phase with {total_batches} batches", "info", {
-                    "stage": "phase_start",
-                    "phase": phase,
-                    "epoch": str(epoch)
-                })
-                print(f"\n{phase} phase - Total batches: {total_batches}")
-
-                for batch_idx, (inputs, labels) in enumerate(dataloaders[phase]):
-                    if batch_idx % 5 == 0:  # Print progress every 5 batches
-                        send_log_to_loki(f"Processing batch {batch_idx}/{total_batches}", "debug", {
-                            "stage": "batch_progress",
-                            "phase": phase,
-                            "epoch": str(epoch),
-                            "batch": str(batch_idx)
-                        })
-                        print(f"Processing batch {batch_idx}/{total_batches}")
-                    
-                    try:
-                        batch_start_time = time.time()
-                        inputs = inputs.to(device)
-                        labels = labels.to(device)
-
-                        optimizer.zero_grad()
-
-                        with torch.set_grad_enabled(phase == 'train'):
-                            outputs = model(inputs)
-                            _, preds = torch.max(outputs, 1)
-                            loss = criterion(outputs, labels)
-
-                            if phase == 'train':
-                                loss.backward()
-                                optimizer.step()
-
-                        running_loss += loss.item() * inputs.size(0)
-                        running_corrects += torch.sum(preds == labels.data)
-
-                        # Calculate and log batch metrics
-                        batch_time = time.time() - batch_start_time
-                        batch_times.append(batch_time)
-                        
-                        try:
-                            send_metric_to_prometheus("batch_time", batch_time)
-                            if batch_idx % 10 == 0:  # Log every 10 batches
-                                batch_loss = loss.item()
-                                batch_acc = torch.sum(preds == labels.data).double() / inputs.size(0)
-                                
-                                metrics_info = {
-                                    "batch_loss": batch_loss,
-                                    "batch_accuracy": float(batch_acc),
-                                    "batch_time": batch_time
-                                }
-                                send_log_to_loki("Batch metrics", "info", 
-                                    {
-                                        "stage": "batch_metrics",
-                                        "phase": phase,
-                                        "epoch": str(epoch),
-                                        "batch": str(batch_idx)
-                                    },
-                                    numeric_values=metrics_info
-                                )
-                                
-                                if phase == 'train':
-                                    send_metric_to_prometheus("train_loss", batch_loss)
-                                    send_metric_to_prometheus("train_accuracy", float(batch_acc))
-                                else:
-                                    send_metric_to_prometheus("val_loss", batch_loss)
-                                    send_metric_to_prometheus("val_accuracy", float(batch_acc))
-                                print(f"Batch {batch_idx} - Loss: {batch_loss:.4f}, Accuracy: {float(batch_acc):.4f}")
-                        except Exception as e:
-                            error_msg = f"Error sending metrics to Prometheus: {str(e)}"
-                            send_log_to_loki(error_msg, "error", {
-                                "stage": "metrics_error",
-                                "phase": phase,
-                                "epoch": str(epoch),
-                                "batch": str(batch_idx)
-                            })
-                            print(error_msg)
-                            continue
-                            
-                    except Exception as e:
-                        error_msg = f"Error processing batch {batch_idx}: {str(e)}"
-                        send_log_to_loki(error_msg, "error", {
-                            "stage": "batch_error",
-                            "phase": phase,
-                            "epoch": str(epoch),
-                            "batch": str(batch_idx)
-                        })
-                        print(error_msg)
-                        continue
-
-                send_log_to_loki(f"Completed {phase} phase", "info", {
-                    "stage": "phase_complete",
-                    "phase": phase,
-                    "epoch": str(epoch)
-                })
-                print(f"Completed {phase} phase")
+        for i, (images, labels) in enumerate(train_loader):
+            if batch_count >= debug_config["max_batches"]:
+                break
                 
-                epoch_loss = running_loss / dataset_sizes[phase]
-                epoch_acc = running_corrects.double() / dataset_sizes[phase]
-
-                print(f'{phase} Loss: {epoch_loss:.4f} Acc: {epoch_acc:.4f}')
-
-                # Log metrics for the epoch
-                try:
-                    metrics_info = {
-                        "epoch_loss": float(epoch_loss),
-                        "epoch_accuracy": float(epoch_acc),
-                        "epoch_time": float(time.time() - epoch_start_time)
-                    }
-                    if phase == 'train':
-                        current_lr = optimizer.param_groups[0]['lr']
-                        metrics_info["learning_rate"] = current_lr
-                        send_metric_to_prometheus("learning_rate", current_lr)
-                        send_metric_to_prometheus("train_loss", epoch_loss)
-                        send_metric_to_prometheus("train_accuracy", float(epoch_acc))
-                        mlflow.log_metric("train_loss", epoch_loss, step=epoch)
-                        mlflow.log_metric("train_accuracy", float(epoch_acc), step=epoch)
-                        mlflow.log_metric("learning_rate", current_lr, step=epoch)
-                    else:
-                        send_metric_to_prometheus("val_loss", epoch_loss)
-                        send_metric_to_prometheus("val_accuracy", float(epoch_acc))
-                        mlflow.log_metric("val_loss", epoch_loss, step=epoch)
-                        mlflow.log_metric("val_accuracy", float(epoch_acc), step=epoch)
-                    
-                    send_log_to_loki("Epoch metrics", "info", 
-                        {
-                            "stage": "epoch_metrics",
-                            "phase": phase,
-                            "epoch": str(epoch)
-                        },
-                        numeric_values=metrics_info
-                    )
-                except Exception as e:
-                    error_msg = f"Error logging epoch metrics: {str(e)}"
-                    send_log_to_loki(error_msg, "error", {
-                        "stage": "metrics_error",
-                        "phase": phase,
-                        "epoch": str(epoch)
-                    })
-                    print(error_msg)
-
-                # Save best model weights
-                if phase == 'val' and epoch_acc > best_acc:
-                    best_acc = epoch_acc
-                    best_model_wts = copy.deepcopy(model.state_dict())
-                    send_log_to_loki(f"New best model saved with accuracy: {float(best_acc)}", "info", {
-                        "stage": "model_checkpoint",
-                        "epoch": str(epoch)
-                    })
-
-            # Log epoch time
-            epoch_time = time.time() - epoch_start_time
-            try:
-                send_metric_to_prometheus("epoch_time", epoch_time)
-                mlflow.log_metric("epoch_time", epoch_time, step=epoch)
-                send_log_to_loki(f"Epoch {epoch} completed in {epoch_time:.2f} seconds", "info", {
-                    "stage": "epoch_complete",
-                    "epoch": str(epoch),
-                    "epoch_time": str(epoch_time)
-                })
-            except Exception as e:
-                error_msg = f"Error logging epoch time: {str(e)}"
-                send_log_to_loki(error_msg, "error", {
-                    "stage": "metrics_error",
-                    "epoch": str(epoch)
-                })
-                print(error_msg)
-
-            if phase == 'train':
-                scheduler.step()
-
-        send_log_to_loki("Training completed!", "info", {"stage": "training_complete"})
-        print("Training completed!")
+            images = images.to(device)
+            labels = labels.to(device)
+            
+            optimizer.zero_grad()
+            outputs = model(images)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
+            
+            running_loss += loss.item()
+            _, predicted = outputs.max(1)
+            total += labels.size(0)
+            correct += predicted.eq(labels).sum().item()
+            
+            if (i + 1) % debug_config["print_every"] == 0:
+                print(f'Epoch [{epoch + 1}/{debug_config["epochs"]}], '
+                      f'Step [{i + 1}/{debug_config["max_batches"]}], '
+                      f'Loss: {loss.item():.4f}, '
+                      f'Accuracy: {100 * correct / total:.2f}%')
+                
+                # Send metrics to Prometheus
+                send_metric_to_prometheus("train_loss", loss.item())
+                send_metric_to_prometheus("train_accuracy", 100 * correct / total)
+            
+            batch_count += 1
         
-        # Save the best model
-        model.load_state_dict(best_model_wts)
-        mlflow.pytorch.log_model(model, "best_model")
-        send_log_to_loki(f"Best model saved with accuracy: {float(best_acc)}", "info", {
-            "stage": "model_saved",
-            "final_accuracy": str(float(best_acc))
-        })
-
-        # Log final metrics
-        mlflow.log_metric("best_accuracy", best_acc.item())
-
-        # Perform Model Registry if accuracy threshold is met
-        if best_acc >= accuracy_threshold:
-            send_log_to_loki(f"Model meets accuracy threshold ({accuracy_threshold * 100}%). Registering model...", "info", {
-                "stage": "model_registry",
-                "accuracy": str(float(best_acc))
-            })
-            result = mlflow.register_model(
-                f"runs:/{mlflow.active_run().info.run_id}/best_model",
-                "ProjectAkhirModelRegistry"
-            )
-            send_log_to_loki(f"Model registered with name: {result.name}, version: {result.version}", "info", {
-                "stage": "model_registered",
-                "model_name": result.name,
-                "model_version": str(result.version)
-            })
-        else:
-            send_log_to_loki(f"Model accuracy {best_acc:.4f} did not meet threshold ({accuracy_threshold * 100}%).", "warning", {
-                "stage": "model_registry",
-                "accuracy": str(float(best_acc))
-            })
-
-        # Log confusion matrix for validation data
-        log_confusion_matrix(model, dataloaders['val'], class_names)
-        send_log_to_loki("Confusion matrix generated and saved", "info", {"stage": "confusion_matrix"})
-
+        # Validation phase
+        model.eval()
+        val_loss = 0
+        val_correct = 0
+        val_total = 0
+        batch_count = 0
+        
+        with torch.no_grad():
+            for i, (images, labels) in enumerate(val_loader):
+                if batch_count >= debug_config["max_batches"]:
+                    break
+                    
+                images = images.to(device)
+                labels = labels.to(device)
+                outputs = model(images)
+                loss = criterion(outputs, labels)
+                
+                val_loss += loss.item()
+                _, predicted = outputs.max(1)
+                val_total += labels.size(0)
+                val_correct += predicted.eq(labels).sum().item()
+                batch_count += 1
+        
+        val_accuracy = 100 * val_correct / val_total if val_total > 0 else 0
+        val_loss = val_loss / batch_count if batch_count > 0 else 0
+        
+        print(f'Validation - Loss: {val_loss:.4f}, Accuracy: {val_accuracy:.2f}%')
+        
+        # Send validation metrics to Prometheus
+        send_metric_to_prometheus("val_loss", val_loss)
+        send_metric_to_prometheus("val_accuracy", val_accuracy)
+    
     return model
 
 # Main script
