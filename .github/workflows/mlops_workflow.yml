@@ -418,14 +418,10 @@ jobs:
               run: |
                   echo "🔄 Starting DVC push..."
 
-                  # Get list of files to be pushed
-                  echo "📦 Files to be pushed:"
-                  dvc status --cloud
-
                   # Get start time
                   start_time=$(date +%s)
 
-                  # Run DVC push with progress
+                  # Run DVC push
                   dvc push -v
 
                   # Calculate duration
@@ -434,11 +430,10 @@ jobs:
 
                   echo "✅ DVC push completed in ${duration} seconds"
 
-                  # Log the latest pushed files
-                  echo "📝 Latest pushed files:"
-                  dvc list --dvc-only --recursive .
+                  # Get summary of changes instead of full file list
+                  dvc_status=$(dvc status --cloud | head -n 5)
 
-                  # Create summary for Loki
+                  # Send compact log to Loki
                   python - << EOF
                   import requests
                   import json
@@ -446,8 +441,17 @@ jobs:
                   import os
                   from datetime import datetime
 
-                  def send_dvc_log(files_info):
+                  def send_dvc_log():
                       timestamp = int(time.time() * 1e9)
+                      
+                      # Create compact summary
+                      summary = {
+                          "message": "DVC Push Summary",
+                          "duration_seconds": ${duration},
+                          "status": """${dvc_status}""",
+                          "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                      }
+                      
                       payload = {
                           "streams": [{
                               "stream": {
@@ -457,12 +461,7 @@ jobs:
                                   "level": "info"
                               },
                               "values": [
-                                  [str(timestamp), json.dumps({
-                                      "message": "DVC Push Summary",
-                                      "files": files_info,
-                                      "push_duration": ${duration},
-                                      "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                                  })]
+                                  [str(timestamp), json.dumps(summary)]
                               ]
                           }]
                       }
@@ -481,16 +480,7 @@ jobs:
                       except Exception as e:
                           print(f"❌ Error sending DVC push log: {e}")
 
-                  # Get list of tracked files
-                  import subprocess
-                  result = subprocess.run(['dvc', 'list', '--dvc-only', '--recursive', '.'], 
-                                        capture_output=True, text=True)
-                  files = result.stdout.strip().split('\n')
-
-                  send_dvc_log(files)
-
-                  print("\n📊 To view DVC push logs in Grafana, use this query:")
-                  print('   {job="mlops_training", component="dvc_tracking"} | json')
+                  send_dvc_log()
                   EOF
 
             # Model Performance Tracking
@@ -612,7 +602,6 @@ jobs:
                       )
                       
                       try:
-                          # Get last 5 metrics
                           response = supabase.table('model_metrics').select("*").order('created_at', desc=True).limit(5).execute()
                           if response.data:
                               return response.data
@@ -620,6 +609,19 @@ jobs:
                       except Exception as e:
                           print(f"⚠️ Error getting historical metrics: {e}")
                           return []
+
+                  def parse_timestamp(ts_str):
+                      try:
+                          # Remove microseconds if present
+                          if '.' in ts_str:
+                              ts_str = ts_str.split('.')[0]
+                          # Add UTC timezone if not present
+                          if '+' not in ts_str:
+                              ts_str += '+00:00'
+                          return datetime.fromisoformat(ts_str)
+                      except Exception as e:
+                          print(f"⚠️ Error parsing timestamp {ts_str}: {e}")
+                          return datetime.now()
 
                   def should_retrain(current_metrics, historical_metrics, threshold=0.05):
                       if not historical_metrics:
@@ -636,7 +638,7 @@ jobs:
                           return True
                       
                       # Check if last training was more than 7 days ago
-                      last_training = datetime.fromisoformat(historical_metrics[0]["created_at"].replace("Z", "+00:00"))
+                      last_training = parse_timestamp(historical_metrics[0]["created_at"])
                       if (datetime.now() - last_training) > timedelta(days=7):
                           print("Weekly retraining triggered")
                           return True

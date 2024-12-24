@@ -200,7 +200,7 @@ def send_log_to_loki(log_message, log_level="info", labels=None, numeric_values=
     }
     
     payload = {
-        "streams": [{
+            "streams": [{
             "stream": labels,
             "values": [
                 [str(timestamp), json.dumps(log_entry)]
@@ -238,10 +238,10 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
     best_val_loss = float('inf')
     train_losses = []
     val_losses = []
-    
-    for epoch in range(num_epochs):
-        model.train()
-        running_loss = 0.0
+
+        for epoch in range(num_epochs):
+                    model.train()
+                running_loss = 0.0
         batch_count = 0
         
         print(f"\ntrain phase:")
@@ -251,12 +251,12 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
                 
             images, labels = images.to(device), labels.to(device)
             
-            optimizer.zero_grad()
+                    optimizer.zero_grad()
             outputs = model(images)
-            loss = criterion(outputs, labels)
-            loss.backward()
-            optimizer.step()
-            
+                        loss = criterion(outputs, labels)
+                            loss.backward()
+                            optimizer.step()
+
             running_loss += loss.item()
             batch_count += 1
             
@@ -329,7 +329,7 @@ if __name__ == "__main__":
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(model.parameters(), lr=learning_rate, momentum=momentum)
     exp_lr_scheduler = lr_scheduler.StepLR(optimizer, step_size=scheduler_step_size, gamma=scheduler_gamma)
-    
+
     # Create data loaders
     dataloaders = {
         'train': torch.utils.data.DataLoader(datasets['train'], batch_size=batch_size, shuffle=True),
