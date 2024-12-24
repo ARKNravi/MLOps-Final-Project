@@ -1,0 +1,54 @@
+name: Deploy to Streamlit Cloud
+
+on:
+    workflow_run:
+        workflows: ["MLOps CI/CD Pipeline"]
+        types:
+            - completed
+
+jobs:
+    deploy:
+        runs-on: ubuntu-latest
+        if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v2
+
+            - name: Setup Python
+              uses: actions/setup-python@v2
+              with:
+                  python-version: "3.8"
+
+            - name: Install dependencies
+              run: |
+                  pip install -r requirements-deploy.txt
+
+            - name: Create Streamlit secrets
+              env:
+                  SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+                  SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+              run: |
+                  mkdir -p ~/.streamlit
+                  echo "[server]" > ~/.streamlit/config.toml
+                  echo "headless = true" >> ~/.streamlit/config.toml
+                  echo "enableCORS = false" >> ~/.streamlit/config.toml
+                  echo "[theme]" >> ~/.streamlit/config.toml
+                  echo "primaryColor = '#795548'" >> ~/.streamlit/config.toml
+                  echo "backgroundColor = '#FFFFFF'" >> ~/.streamlit/config.toml
+                  echo "secondaryBackgroundColor = '#F5F5F5'" >> ~/.streamlit/config.toml
+                  echo "textColor = '#262730'" >> ~/.streamlit/config.toml
+                  echo "font = 'sans serif'" >> ~/.streamlit/config.toml
+
+                  # Create secrets.toml
+                  echo "[connections.supabase]" > ~/.streamlit/secrets.toml
+                  echo "url = \"$SUPABASE_URL\"" >> ~/.streamlit/secrets.toml
+                  echo "key = \"$SUPABASE_KEY\"" >> ~/.streamlit/secrets.toml
+
+            - name: Deploy to Streamlit Cloud
+              uses: streamlit/streamlit-deploy@v1
+              with:
+                  app-name: coffee-bean-classifier
+                  streamlit-credentials-toml: |
+                      [general]
+                      gitHubAccessToken = "${{ secrets.STREAMLIT_GITHUB_TOKEN }}"

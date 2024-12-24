@@ -42,7 +42,7 @@ except Exception as e:
     raise
 
 # Hyperparameters
-num_epochs = 3
+num_epochs = 2
 batch_size = 4
 learning_rate = 0.001
 momentum = 0.9
@@ -50,6 +50,10 @@ scheduler_step_size = 7
 scheduler_gamma = 0.1
 num_classes = 4
 device = torch.device("cpu")
+
+# Training parameters
+train_batches = 1200
+val_batches = 400
 
 # Accuracy threshold for model registry
 accuracy_threshold = 0.8  
@@ -251,10 +255,8 @@ def save_metrics_to_supabase(metrics, phase="train"):
 # Training function
 def train_model(model, train_loader, val_loader, criterion, optimizer, num_epochs, device):
     # Set debug mode for quick training
-    debug_mode = True  # Force debug mode to be True
-    print("🔧 Running in debug mode: 1 epoch, 10 batches only")
-    num_epochs = 1  # Force 1 epoch
-    max_batches = 10  # Force 10 batches
+    debug_mode = False  # Disable debug mode
+    print(f"🚀 Running full training: {num_epochs} epochs, {train_batches} train batches, {val_batches} val batches")
     
     best_val_loss = float('inf')
     train_losses = []
@@ -263,11 +265,13 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
     for epoch in range(num_epochs):
         model.train()
         running_loss = 0.0
+        correct = 0
+        total = 0
         batch_count = 0
         
         print(f"\ntrain phase:")
         for i, (images, labels) in enumerate(train_loader):
-            if debug_mode and i >= max_batches:
+            if i >= train_batches:
                 break
                 
             images, labels = images.to(device), labels.to(device)
@@ -279,10 +283,14 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
             optimizer.step()
             
             running_loss += loss.item()
+            _, predicted = torch.max(outputs.data, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
             batch_count += 1
             
-            if i % 5 == 0:  # Log every 5 batches
-                print(f"Epoch {epoch+1}, Batch {i+1}: Loss = {loss.item():.4f}")
+            if i % 10 == 0:  # Log every 10 batches
+                print(f"Batch {i}/{train_batches}")
+                print(f"Batch {i}/{train_batches} - Loss: {loss.item():.4f}")
                 
             # Send metrics every 10 batches
             if i % 10 == 0:
@@ -293,13 +301,18 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
                 )
         
         avg_train_loss = running_loss / batch_count
+        train_accuracy = 100 * correct / total
         train_losses.append(avg_train_loss)
         
         # Save training metrics to Supabase
         save_metrics_to_supabase({
             "loss": avg_train_loss,
-            "epoch": epoch + 1
-        }, phase="train")
+            "accuracy": train_accuracy,
+            "epoch": epoch + 1,
+            "phase": "train"
+        })
+        
+        print(f'train Loss: {avg_train_loss:.4f} Acc: {train_accuracy:.4f}')
         
         # Validation phase
         model.eval()
@@ -308,10 +321,10 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
         val_total = 0
         batch_count = 0
         
-        print(f"\nvalidation phase:")
+        print(f"\nval phase:")
         with torch.no_grad():
             for i, (images, labels) in enumerate(val_loader):
-                if debug_mode and i >= max_batches:
+                if i >= val_batches:
                     break
                     
                 images, labels = images.to(device), labels.to(device)
@@ -324,8 +337,9 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
                 val_correct += (predicted == labels).sum().item()
                 batch_count += 1
                 
-                if i % 5 == 0:  # Log every 5 batches
-                    print(f"Validation Batch {i+1}: Loss = {loss.item():.4f}")
+                if i % 10 == 0:  # Log every 10 batches
+                    print(f"Batch {i}/{val_batches}")
+                    print(f"Batch {i}/{val_batches} - Loss: {loss.item():.4f}")
         
         avg_val_loss = val_loss / batch_count
         val_accuracy = 100 * val_correct / val_total
@@ -335,13 +349,11 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
         save_metrics_to_supabase({
             "loss": avg_val_loss,
             "accuracy": val_accuracy,
-            "epoch": epoch + 1
-        }, phase="validation")
+            "epoch": epoch + 1,
+            "phase": "validation"
+        })
         
-        print(f'Epoch [{epoch+1}/{num_epochs}]:')
-        print(f'Train Loss: {avg_train_loss:.4f}')
-        print(f'Val Loss: {avg_val_loss:.4f}')
-        print(f'Val Accuracy: {val_accuracy:.2f}%')
+        print(f'val Loss: {avg_val_loss:.4f} Acc: {val_accuracy:.4f}')
         
         # Send epoch metrics
         send_metric_to_prometheus("epoch_train_loss", avg_train_loss, {"epoch": str(epoch + 1)})
