@@ -42,7 +42,7 @@ except Exception as e:
     raise
 
 # Hyperparameters
-num_epochs = 2
+num_epochs = 1
 batch_size = 4
 learning_rate = 0.001
 momentum = 0.9
@@ -52,8 +52,8 @@ num_classes = 4
 device = torch.device("cpu")
 
 # Training parameters
-train_batches = 1200
-val_batches = 400
+train_batches = 100
+val_batches = 50
 
 # Accuracy threshold for model registry
 accuracy_threshold = 0.8  
