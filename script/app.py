@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from pydantic import BaseModel
 from typing import Optional
+import sys
 
 # Inisialisasi FastAPI
 api = FastAPI(title="Coffee Bean Classifier API")
@@ -36,8 +37,8 @@ class FeedbackModel(BaseModel):
 
 # Inisialisasi Supabase
 supabase: Client = create_client(
-    os.environ.get("SUPABASE_URL", ""),
-    os.environ.get("SUPABASE_KEY", "")
+    supabase_url=os.environ.get("SUPABASE_URL"),
+    supabase_key=os.environ.get("SUPABASE_KEY")
 )
 
 # Konfigurasi model
@@ -48,13 +49,19 @@ model = initialize_model(num_classes).to(device)
 # Load model weights
 @st.cache_resource
 def load_model():
-    model_path = "model/best_model_weights.pth"
-    if os.path.exists(model_path):
-        model.load_state_dict(torch.load(model_path, map_location=device))
-        model.eval()
-        return model
-    else:
-        st.error("Model weights tidak ditemukan!")
+    try:
+        model_path = os.path.join(os.path.dirname(__file__), "..", "model", "best_model_weights.pth")
+        if os.path.exists(model_path):
+            model.load_state_dict(torch.load(model_path, map_location=device))
+            model.eval()
+            return model
+        else:
+            st.error(f"Model weights tidak ditemukan di path: {model_path}")
+            st.info("Pastikan file model tersedia di direktori yang benar.")
+            return None
+    except Exception as e:
+        st.error(f"Error loading model: {str(e)}")
+        st.info("Coba restart aplikasi jika error berlanjut.")
         return None
 
 # Transformasi gambar
@@ -270,9 +277,31 @@ def main():
         """)
 
 if __name__ == "__main__":
-    # Jalankan Streamlit
-    main()
-    
-    # Jalankan FastAPI jika dijalankan sebagai server
-    if os.environ.get("FASTAPI_SERVER", "false").lower() == "true":
-        uvicorn.run(api, host="0.0.0.0", port=8000) 
+    try:
+        # Setup logging
+        import logging
+        logging.basicConfig(level=logging.INFO)
+        logger = logging.getLogger(__name__)
+        
+        # Log environment info
+        logger.info(f"Python version: {sys.version}")
+        logger.info(f"Torch version: {torch.__version__}")
+        logger.info(f"Current working directory: {os.getcwd()}")
+        
+        # Check environment variables
+        if not os.environ.get("SUPABASE_URL") or not os.environ.get("SUPABASE_KEY"):
+            st.error("Error: Missing required environment variables. Please check your deployment configuration.")
+            logger.error("Missing required environment variables")
+        else:
+            # Initialize model
+            logger.info("Initializing application...")
+            main()
+            
+            # Run FastAPI if needed
+            if os.environ.get("FASTAPI_SERVER", "false").lower() == "true":
+                logger.info("Starting FastAPI server...")
+                uvicorn.run(api, host="0.0.0.0", port=8000)
+    except Exception as e:
+        logger.error(f"Application error: {str(e)}")
+        st.error(f"Error: {str(e)}")
+        st.info("If you're seeing this error, please check the logs for more details.") 
