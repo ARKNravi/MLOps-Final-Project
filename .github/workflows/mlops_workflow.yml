@@ -448,14 +448,6 @@ jobs:
 
                   def send_dvc_log(files_info):
                       timestamp = int(time.time() * 1e9)
-                      
-                      # Limit the files info to just the count and first few files
-                      files_summary = {
-                          "total_files": len(files_info),
-                          "sample_files": files_info[:5] if files_info else [],
-                          "file_count": len(files_info)
-                      }
-                      
                       payload = {
                           "streams": [{
                               "stream": {
@@ -467,7 +459,7 @@ jobs:
                               "values": [
                                   [str(timestamp), json.dumps({
                                       "message": "DVC Push Summary",
-                                      "files_summary": files_summary,
+                                      "files": files_info,
                                       "push_duration": ${duration},
                                       "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                                   })]
@@ -484,11 +476,6 @@ jobs:
                           )
                           if response.status_code == 204:
                               print("✅ DVC push log sent to Loki")
-                              print(f"📁 Total files tracked: {files_summary['total_files']}")
-                              if files_summary['sample_files']:
-                                  print("\n📝 Sample of tracked files:")
-                                  for file in files_summary['sample_files']:
-                                      print(f"   - {file}")
                           else:
                               print(f"❌ Failed to send DVC push log: {response.text}")
                       except Exception as e:
@@ -498,13 +485,12 @@ jobs:
                   import subprocess
                   result = subprocess.run(['dvc', 'list', '--dvc-only', '--recursive', '.'], 
                                         capture_output=True, text=True)
-                  files = [f for f in result.stdout.strip().split('\n') if f]  # Remove empty lines
+                  files = result.stdout.strip().split('\n')
 
                   send_dvc_log(files)
 
-                  print("\n📊 To view DVC push logs in Grafana, use these queries:")
+                  print("\n📊 To view DVC push logs in Grafana, use this query:")
                   print('   {job="mlops_training", component="dvc_tracking"} | json')
-                  print('   {job="mlops_training", component="dvc_tracking"} | json | total_files > 0')
                   EOF
 
             # Model Performance Tracking
@@ -769,33 +755,39 @@ jobs:
                       }
                       comparison_data.append(metrics)
 
-                  # Create comparison report
-                  df = pd.DataFrame(comparison_data)
-                  report = {
-                      "best_model": {
-                          "run_id": df.loc[df["accuracy"].idxmax(), "run_id"],
-                          "accuracy": df["accuracy"].max(),
-                          "improvement": float(df["accuracy"].max() - df["accuracy"].mean())
-                      },
-                      "trend": {
-                          "accuracy_trend": float(df["accuracy"].diff().mean()),
-                          "loss_trend": float(df["loss"].diff().mean())
-                      },
-                      "comparison": df.to_dict(orient="records")
-                  }
+                  # Handle empty runs
+                  if not comparison_data:
+                      report = {
+                          "best_model": {
+                              "run_id": "no_runs",
+                              "accuracy": 0,
+                              "improvement": 0
+                          },
+                          "trend": {
+                              "accuracy_trend": 0,
+                              "loss_trend": 0
+                          },
+                          "comparison": []
+                      }
+                  else:
+                      # Create comparison report
+                      df = pd.DataFrame(comparison_data)
+                      report = {
+                          "best_model": {
+                              "run_id": df.loc[df["accuracy"].idxmax(), "run_id"] if not df.empty else "no_runs",
+                              "accuracy": float(df["accuracy"].max()) if not df.empty else 0,
+                              "improvement": float(df["accuracy"].max() - df["accuracy"].mean()) if not df.empty else 0
+                          },
+                          "trend": {
+                              "accuracy_trend": float(df["accuracy"].diff().mean()) if not df.empty else 0,
+                              "loss_trend": float(df["loss"].diff().mean()) if not df.empty else 0
+                          },
+                          "comparison": comparison_data
+                      }
 
                   # Save comparison report
                   with open("model_comparison.json", "w") as f:
                       json.dump(report, f, indent=2)
-
-                  # Log comparison to MLflow
-                  with mlflow.start_run(run_name="model_comparison"):
-                      mlflow.log_metrics({
-                          "best_accuracy": report["best_model"]["accuracy"],
-                          "accuracy_improvement": report["best_model"]["improvement"],
-                          "accuracy_trend": report["trend"]["accuracy_trend"]
-                      })
-                      mlflow.log_artifact("model_comparison.json")
 
                   # Print summary
                   print("\n📊 Model Comparison Summary:")
@@ -804,6 +796,20 @@ jobs:
                   print(f"Improvement: {report['best_model']['improvement']:.4f}")
                   print(f"Accuracy Trend: {report['trend']['accuracy_trend']:.4f}")
                   EOF
+
+            # Modify training configuration for quick testing
+            - name: Configure Quick Training
+              run: |
+                  echo '{
+                      "training": {
+                          "epochs": 1,
+                          "batch_size": 32,
+                          "test_size": 0.2,
+                          "learning_rate": 0.001,
+                          "validation_split": 0.1,
+                          "max_samples": 1000
+                      }
+                  }' > config.json
 
             - name: Perform A/B Testing Analysis
               run: |
