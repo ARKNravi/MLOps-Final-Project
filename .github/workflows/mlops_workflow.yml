@@ -499,22 +499,15 @@ jobs:
                   MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
                   DAGSHUB_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
                   DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
-                  MLFLOW_TRACKING_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
-                  MLFLOW_TRACKING_PASSWORD: ${{ secrets.DAGSHUB_TOKEN }}
               run: |
                   pip install mlflow scikit-learn
                   python - << EOF
                   import mlflow
                   import json
-                  import os
                   from datetime import datetime
 
-                  # Set MLflow tracking URI and temp directory for artifacts
-                  mlflow.set_tracking_uri(os.environ['MLFLOW_TRACKING_URI'])
-                  os.environ['MLFLOW_ARTIFACTS_DESTINATION'] = '/tmp/mlflow-artifacts'
-
-                  # Create artifacts directory
-                  os.makedirs('/tmp/mlflow-artifacts', exist_ok=True)
+                  # Set MLflow tracking URI
+                  mlflow.set_tracking_uri("$MLFLOW_TRACKING_URI")
 
                   # Get latest model metrics
                   client = mlflow.tracking.MlflowClient()
@@ -543,22 +536,11 @@ jobs:
                   else:
                       print("⚠️ No previous runs found, using default metrics")
 
-                  # Save metrics to temp directory
-                  metrics_path = '/tmp/mlflow-artifacts/model_metrics.json'
-                  with open(metrics_path, "w") as f:
+                  # Save metrics for comparison
+                  with open("model_metrics.json", "w") as f:
                       json.dump(metrics, f)
 
-                  print("📊 Metrics saved to:", metrics_path)
-
-                  # Log metrics to MLflow
-                  with mlflow.start_run(run_name="model_comparison"):
-                      mlflow.log_metrics({
-                          "current_accuracy": metrics["accuracy"],
-                          "current_loss": metrics["loss"]
-                      })
-                      mlflow.log_artifact(metrics_path)
-
-                  print("✅ Metrics logged to MLflow successfully")
+                  print("📊 Metrics saved to model_metrics.json")
                   EOF
 
             # Model Drift Detection
@@ -743,19 +725,29 @@ jobs:
                   MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
                   DAGSHUB_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
                   DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
+                  MLFLOW_TRACKING_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
+                  MLFLOW_TRACKING_PASSWORD: ${{ secrets.DAGSHUB_TOKEN }}
               run: |
+                  # Create temporary directory for MLflow artifacts
+                  mkdir -p /tmp/mlflow/artifacts
+                  export MLFLOW_ARTIFACTS_DESTINATION=/tmp/mlflow/artifacts
+
+                  pip install mlflow scikit-learn pandas numpy requests
                   python - << EOF
                   import mlflow
                   import json
                   import pandas as pd
                   import numpy as np
                   from datetime import datetime, timedelta
+                  import os
 
-                  # Set MLflow tracking URI
-                  mlflow.set_tracking_uri("$MLFLOW_TRACKING_URI")
-                  client = mlflow.tracking.MlflowClient()
+                  # Set MLflow tracking URI and temp artifact location
+                  mlflow.set_tracking_uri(os.environ['MLFLOW_TRACKING_URI'])
+                  print(f"MLflow tracking URI: {mlflow.get_tracking_uri()}")
+                  print(f"MLflow artifact location: {os.environ.get('MLFLOW_ARTIFACTS_DESTINATION')}")
 
                   # Get recent runs
+                  client = mlflow.tracking.MlflowClient()
                   runs = client.search_runs(
                       experiment_ids=["1"],
                       order_by=["start_time DESC"],
@@ -806,8 +798,10 @@ jobs:
                           "comparison": []
                       }
 
-                  # Save comparison report
-                  with open("model_comparison.json", "w") as f:
+                  # Save comparison report to temp directory
+                  report_path = "/tmp/mlflow/artifacts/model_comparison.json"
+                  os.makedirs(os.path.dirname(report_path), exist_ok=True)
+                  with open(report_path, "w") as f:
                       json.dump(report, f, indent=2)
 
                   # Log comparison to MLflow
@@ -817,7 +811,7 @@ jobs:
                           "accuracy_improvement": report["best_model"]["improvement"],
                           "accuracy_trend": report["trend"]["accuracy_trend"]
                       })
-                      mlflow.log_artifact("model_comparison.json")
+                      mlflow.log_artifact(report_path)
 
                   # Print summary
                   print("\n📊 Model Comparison Summary:")
@@ -825,6 +819,10 @@ jobs:
                   print(f"Best Accuracy: {report['best_model']['accuracy']:.4f}")
                   print(f"Improvement: {report['best_model']['improvement']:.4f}")
                   print(f"Accuracy Trend: {report['trend']['accuracy_trend']:.4f}")
+
+                  # Save report for next step
+                  with open("/tmp/mlflow/artifacts/model_comparison.json", "w") as f:
+                      json.dump(report, f)
                   EOF
 
             - name: Perform A/B Testing Analysis
