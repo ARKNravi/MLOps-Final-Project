@@ -9,7 +9,645 @@ on:
             - main
 
 jobs:
+    monitoring_setup:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v2
+
+            - name: Configure Grafana Cloud
+              env:
+                  GRAFANA_CLOUD_API_KEY: ${{ secrets.GRAFANA_CLOUD_API_KEY }}
+                  GRAFANA_CLOUD_API_URL: ${{ secrets.GRAFANA_CLOUD_URL }}
+                  PROMETHEUS_REMOTE_WRITE_URL: ${{ secrets.PROMETHEUS_REMOTE_WRITE_URL }}
+                  LOKI_URL: ${{ secrets.LOKI_URL }}
+              run: |
+                  cat > prometheus.yml << EOF
+                  global:
+                    scrape_interval: 15s
+                    evaluation_interval: 15s
+                    external_labels:
+                      environment: github_actions
+                      job: mlops_training
+                    
+                  remote_write:
+                    - url: ${PROMETHEUS_REMOTE_WRITE_URL}
+                      basic_auth:
+                        username: ${GRAFANA_CLOUD_API_KEY}
+                        password: ${GRAFANA_CLOUD_API_KEY}
+                      write_relabel_configs:
+                        - source_labels: [__name__]
+                          regex: '(train_loss|train_accuracy|val_loss|val_accuracy|learning_rate|epoch_time|batch_time)'
+                          action: keep
+                        
+                  scrape_configs:
+                    - job_name: 'mlops-metrics'
+                      static_configs:
+                        - targets: ['localhost:8000']
+                      labels:
+                        environment: github_actions
+                  EOF
+
+                  # Verify configuration
+                  echo "Testing connection to Grafana Cloud..."
+                  curl -I -H "Authorization: Bearer ${GRAFANA_CLOUD_API_KEY}" ${GRAFANA_CLOUD_API_URL}/api/health
+
+            # Menambahkan langkah untuk memverifikasi pengiriman metrik
+            - name: Test Metric Push
+              env:
+                  PROMETHEUS_API_KEY: ${{ secrets.PROMETHEUS_API_KEY }}
+                  PROMETHEUS_USERNAME: "1902030"
+                  PROMETHEUS_REMOTE_WRITE_URL: ${{ secrets.PROMETHEUS_REMOTE_WRITE_URL }}
+              run: |
+                  # Install dependencies
+                  sudo apt-get update && sudo apt-get install -y python3-pip
+                  sudo apt-get install -y protobuf-compiler
+                  pip3 install prometheus-client requests python-snappy protobuf
+                  # Buat file proto secara inline
+                  cat > remote_write.proto << EOF
+                  syntax = "proto3";
+                  package prometheus;
+
+                  option go_package = "prompb";
+
+                  message WriteRequest {
+                    repeated TimeSeries timeseries = 1;
+                  }
+
+                  message TimeSeries {
+                    repeated Label labels = 1;
+                    repeated Sample samples = 2;
+                  }
+
+                  message Label {
+                    string name = 1;
+                    string value = 2;
+                  }
+
+                  message Sample {
+                    double value = 1;
+                    int64 timestamp = 2;
+                  }
+                  EOF
+
+                  # Generate Python file dari proto
+                  protoc --python_out=. remote_write.proto
+
+                  # Verifikasi file yang dibuat
+                  ls -la remote_write*
+
+                  # Buat script Python untuk mengirim metrik
+                  cat > send_metric.py << EOF
+                  import os
+                  import json
+                  import snappy as python_snappy
+                  import requests
+                  from remote_write_pb2 import WriteRequest, TimeSeries, Label, Sample
+                  from datetime import datetime, timezone
+
+                  def send_metric():
+                      # Buat timestamp dalam format yang benar (millisekon)
+                      timestamp_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+                      
+                      # Inisialisasi WriteRequest
+                      write_req = WriteRequest()
+                      
+                      # Tambahkan TimeSeries
+                      ts = write_req.timeseries.add()
+                      
+                      # Tambahkan Labels
+                      labels = [
+                          ("__name__", "test_metric"),
+                          ("job", "github_actions_test"),
+                          ("instance", "test"),
+                          ("environment", "github_actions")
+                      ]
+                      
+                      for name, value in labels:
+                          label = ts.labels.add()
+                          label.name = name
+                          label.value = value
+                      
+                      # Tambahkan Sample
+                      sample = ts.samples.add()
+                      sample.value = 1.0
+                      sample.timestamp = timestamp_ms
+                      
+                      # Serialize ke Protobuf
+                      data = write_req.SerializeToString()
+                      
+                      # Kompresi dengan Snappy
+                      compressed_data = python_snappy.compress(data)
+
+                      url = os.environ['PROMETHEUS_REMOTE_WRITE_URL']
+                      username = os.environ['PROMETHEUS_USERNAME']
+                      password = os.environ['PROMETHEUS_API_KEY']
+                      
+                      headers = {
+                          "Content-Encoding": "snappy",
+                          "Content-Type": "application/x-protobuf",
+                          "X-Prometheus-Remote-Write-Version": "0.1.0"
+                      }
+
+                      try:
+                          response = requests.post(
+                              url,
+                              data=compressed_data,
+                              auth=(username, password),
+                              headers=headers
+                          )
+                          
+                          print(f"Status code: {response.status_code}")
+                          if response.text:
+                              print(f"Response: {response.text}")
+                          
+                          if response.status_code in [200, 204]:
+                              print("✅ Metric sent successfully")
+                          else:
+                              print("❌ Failed to send metric")
+                              if response.text:
+                                  print(f"Error: {response.text}")
+                              print(f"Request URL: {url}")
+                              print(f"Request headers: {headers}")
+                      except Exception as e:
+                          print(f"Error sending metric: {e}")
+                          exit(1)
+
+                  if __name__ == "__main__":
+                      send_metric()
+                  EOF
+
+                  # Jalankan script
+                  python3 send_metric.py
+
+            # Menambahkan langkah untuk memverifikasi pengiriman log
+            - name: Test Loki Push
+              env:
+                  LOKI_API_KEY: ${{ secrets.LOKI_API_KEY }}
+                  LOKI_USERNAME: "1050298"
+                  LOKI_URL: ${{ secrets.LOKI_URL }}
+              run: |
+                  echo "🚀 Starting Loki log test..."
+
+                  # Install Python dan dependencies
+                  sudo apt-get update && sudo apt-get install -y python3-pip
+                  pip3 install requests
+
+                  echo "📦 Dependencies installed successfully"
+
+                  # Buat script Python untuk test Loki
+                  cat > test_loki.py << EOF
+                  import os
+                  import requests
+                  import json
+                  import time
+                  from datetime import datetime
+
+                  def test_loki_connection():
+                      print("🔍 Testing Loki connection...")
+                      
+                      # Test dengan mengirim log sederhana
+                      timestamp = int(time.time() * 1e9)
+                      payload = {
+                          "streams": [{
+                          "stream": {
+                            "job": "mlops_training",
+                            "environment": "github_actions",
+                                  "level": "info",
+                                  "test": "true",
+                                  "component": "connection_test"
+                              },
+                              "values": [
+                                  [str(timestamp), json.dumps({
+                                      "message": "Loki connection test",
+                                      "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                  })]
+                              ]
+                          }]
+                      }
+                      
+                      try:
+                          response = requests.post(
+                              f"{os.environ['LOKI_URL']}/loki/api/v1/push",
+                              json=payload,
+                              auth=(os.environ['LOKI_USERNAME'], os.environ['LOKI_API_KEY']),
+                              headers={"Content-Type": "application/json"}
+                          )
+                          print(f"✨ Loki connection test status: {response.status_code}")
+                          if response.status_code == 204:
+                              print("✅ Successfully connected to Loki")
+                              return True
+                          else:
+                              print(f"❌ Connection failed: {response.text}")
+                              return False
+                      except Exception as e:
+                          print(f"❌ Connection error: {e}")
+                          return False
+
+                  def send_test_logs():
+                      print("\n📝 Preparing test logs...")
+                      timestamp = int(time.time() * 1e9)
+                      current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                      
+                      test_logs = [
+                          {
+                              "level": "info",
+                              "message": "MLOps Training Pipeline Started",
+                              "value": 1.0,
+                              "metric_value": 100.5
+                          },
+                          {
+                              "level": "info",
+                              "message": "Model Training Configuration Loaded",
+                              "value": 2.0,
+                              "metric_value": 200.5
+                          },
+                          {
+                              "level": "info",
+                              "message": "Data Pipeline Initialized",
+                              "value": 3.0,
+                              "metric_value": 300.5
+                          },
+                          {
+                              "level": "info",
+                              "message": "Training Environment Ready",
+                              "value": 4.0,
+                              "metric_value": 400.5
+                          }
+                      ]
+                      
+                      success_count = 0
+                      for log in test_logs:
+                          log_entry = {
+                              "message": log["message"],
+                              "timestamp": current_time,
+                              "level": log["level"],
+                              "value": log["value"],
+                              "metric_value": log["metric_value"],
+                              "test_type": "mlops_pipeline_test"
+                          }
+                          
+                          payload = {
+                              "streams": [{
+                                  "stream": {
+                                      "job": "mlops_training",
+                                      "environment": "github_actions",
+                                      "level": log["level"],
+                                      "test": "true",
+                                      "component": "pipeline_test"
+                                  },
+                                  "values": [
+                                      [str(timestamp), json.dumps(log_entry)]
+                                  ]
+                              }]
+                          }
+                          
+                          try:
+                              response = requests.post(
+                                  f"{os.environ['LOKI_URL']}/loki/api/v1/push",
+                                  json=payload,
+                                  auth=(os.environ['LOKI_USERNAME'], os.environ['LOKI_API_KEY']),
+                                  headers={"Content-Type": "application/json"}
+                              )
+                              if response.status_code == 204:
+                                  print(f"✅ Successfully sent log: {log['message']}")
+                                  success_count += 1
+                              else:
+                                  print(f"❌ Failed to send log: {response.text}")
+                          except Exception as e:
+                              print(f"❌ Error sending log: {e}")
+                              return False
+                      
+                      print(f"\n📊 Log sending summary:")
+                      print(f"Total logs: {len(test_logs)}")
+                      print(f"Successfully sent: {success_count}")
+                      print(f"Failed: {len(test_logs) - success_count}")
+                      
+                      return success_count == len(test_logs)
+
+                  if __name__ == "__main__":
+                      print("\n🔄 Testing Loki connectivity...")
+                      if test_loki_connection():
+                          print("\n🚀 Starting log sending test...")
+                          if send_test_logs():
+                              print("\n✅ All test logs sent successfully!")
+                              print("\n🔍 To verify logs in Grafana Loki, use these queries:")
+                              print("\n1. View connection test:")
+                              print('   {job="mlops_training", component="connection_test"}')
+                              print("\n2. View pipeline test logs:")
+                              print('   {job="mlops_training", component="pipeline_test"}')
+                              print("\n3. View all test logs:")
+                              print('   {job="mlops_training", test="true"}')
+                              print("\n4. View numeric values:")
+                              print('   {job="mlops_training", test="true"} | json | metric_value > 0')
+                          else:
+                              print("\n❌ Some logs failed to send")
+                              exit(1)
+                      else:
+                          print("\n❌ Loki connection test failed")
+                          exit(1)
+                  EOF
+
+                  echo "📜 Test script created successfully"
+
+                  # Jalankan test
+                  echo "\n🏃 Running Loki test..."
+                  python3 test_loki.py
+
+                  echo "\n✨ Loki test completed"
+
+    # Step 1: Data Versioning and Model Management
+    data_versioning:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v2
+              with:
+                  fetch-depth: 0
+
+            - name: Set up Python
+              uses: actions/setup-python@v2
+              with:
+                  python-version: "3.8"
+
+            - name: Install DVC
+              run: |
+                  pip install dvc[s3]
+                  pip install dvclive
+
+            - name: Configure DVC remote
+              env:
+                  SUPABASE_S3_ACCESS_KEY_ID: ${{ secrets.SUPABASE_S3_ACCESS_KEY_ID }}
+                  SUPABASE_S3_SECRET_ACCESS_KEY: ${{ secrets.SUPABASE_S3_SECRET_ACCESS_KEY }}
+              run: |
+                  # Check if .dvc exists and remove it if necessary
+                  if [ -d ".dvc" ]; then
+                      echo "🗑️ Removing existing .dvc directory..."
+                      rm -rf .dvc
+                  fi
+
+                  echo "🚀 Initializing DVC..."
+                  dvc init --no-scm
+
+                  echo "⚙️ Configuring DVC remote storage..."
+                  # Update bucket name to mlops_workflow
+                  dvc remote add -d storage s3://mlops_workflow/mlops-data
+                  dvc remote modify storage endpointurl https://zyzahbhyrgrsakuwwdjr.supabase.co/storage/v1/s3
+                  dvc remote modify storage access_key_id ${SUPABASE_S3_ACCESS_KEY_ID}
+                  dvc remote modify storage secret_access_key ${SUPABASE_S3_SECRET_ACCESS_KEY}
+                  dvc remote modify storage region ap-southeast-1
+
+                  echo "📝 DVC configuration:"
+                  dvc remote list
+                  dvc remote modify storage --local access_key_id ${SUPABASE_S3_ACCESS_KEY_ID}
+                  dvc remote modify storage --local secret_access_key ${SUPABASE_S3_SECRET_ACCESS_KEY}
+
+            - name: Track dataset with DVC
+              run: |
+                  dvc add dataset/
+                  git add dataset.dvc .gitignore
+                  git config --global user.email "github-actions@github.com"
+                  git config --global user.name "GitHub Actions"
+                  git commit -m "feat(data): Track dataset with DVC"
+
+            - name: Push dataset to DVC remote
+              env:
+                  LOKI_API_KEY: ${{ secrets.LOKI_API_KEY }}
+                  LOKI_USERNAME: "1050298"
+                  LOKI_URL: ${{ secrets.LOKI_URL }}
+              run: |
+                  echo "🔄 Starting DVC push..."
+
+                  # Get start time
+                  start_time=$(date +%s)
+
+                  # Run DVC push
+                  dvc push -v
+
+                  # Calculate duration
+                  end_time=$(date +%s)
+                  duration=$((end_time - start_time))
+
+                  echo "✅ DVC push completed in ${duration} seconds"
+
+                  # Get summary of changes instead of full file list
+                  dvc_status=$(dvc status --cloud | head -n 5)
+
+                  # Send compact log to Loki
+                  python - << EOF
+                  import requests
+                  import json
+                  import time
+                  import os
+                  from datetime import datetime
+
+                  def send_dvc_log():
+                      timestamp = int(time.time() * 1e9)
+                      
+                      # Create compact summary
+                      summary = {
+                          "message": "DVC Push Summary",
+                          "duration_seconds": ${duration},
+                          "status": """${dvc_status}""",
+                          "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                      }
+                      
+                      payload = {
+                          "streams": [{
+                              "stream": {
+                                  "job": "mlops_training",
+                                  "environment": "github_actions",
+                                  "component": "dvc_tracking",
+                                  "level": "info"
+                              },
+                              "values": [
+                                  [str(timestamp), json.dumps(summary)]
+                              ]
+                          }]
+                      }
+                      
+                      try:
+                          response = requests.post(
+                              f"{os.environ['LOKI_URL']}/loki/api/v1/push",
+                              json=payload,
+                              auth=(os.environ['LOKI_USERNAME'], os.environ['LOKI_API_KEY']),
+                              headers={"Content-Type": "application/json"}
+                          )
+                          if response.status_code == 204:
+                              print("✅ DVC push log sent to Loki")
+                          else:
+                              print(f"❌ Failed to send DVC push log: {response.text}")
+                      except Exception as e:
+                          print(f"❌ Error sending DVC push log: {e}")
+
+                  send_dvc_log()
+                  EOF
+
+            # Model Performance Tracking
+            - name: Setup MLflow for Model Comparison
+              env:
+                  MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+                  DAGSHUB_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
+                  DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
+                  SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+                  SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+              run: |
+                  pip install mlflow scikit-learn pandas numpy requests supabase
+                  python - << EOF
+                  import mlflow
+                  import json
+                  import pandas as pd
+                  from datetime import datetime
+                  import os
+                  from supabase import create_client, Client
+
+                  # Set MLflow tracking URI
+                  mlflow.set_tracking_uri(os.environ['MLFLOW_TRACKING_URI'])
+                  print(f"MLflow tracking URI: {mlflow.get_tracking_uri()}")
+
+                  # Initialize Supabase client
+                  supabase: Client = create_client(
+                      os.environ.get("SUPABASE_URL"),
+                      os.environ.get("SUPABASE_KEY")
+                  )
+
+                  def get_latest_metrics():
+                      try:
+                          response = supabase.table('model_metrics').select("*").order('created_at', desc=True).limit(1).execute()
+                          if response.data:
+                              metrics = response.data[0]
+                              print("✅ Found metrics from Supabase")
+                              return {
+                                  "accuracy": metrics["accuracy"],
+                                  "loss": metrics["loss"],
+                                  "timestamp": metrics["created_at"]
+                              }
+                      except Exception as e:
+                          print(f"⚠️ Error accessing Supabase: {e}")
+                      
+                      # Default metrics if nothing found
+                      print("⚠️ No previous metrics found, using defaults")
+                      return {
+                          "accuracy": 0,
+                          "loss": float('inf'),
+                          "timestamp": datetime.now().isoformat()
+                      }
+
+                  # Get current metrics or create default ones if file doesn't exist
+                  current_metrics = {
+                      "accuracy": 0,
+                      "loss": float('inf'),
+                      "timestamp": datetime.now().isoformat()
+                  }
+
+                  # Save current metrics
+                  with open("model_metrics.json", "w") as f:
+                      json.dump(current_metrics, f)
+
+                  # Check if retraining needed
+                  latest_metrics = get_latest_metrics()
+                  retrain = True  # Selalu retrain jika ada push
+
+                  # Save decision
+                  with open("retrain.txt", "w") as f:
+                      f.write("true" if retrain else "false")
+
+                  print(f"\n🔄 Retraining decision: {'Yes' if retrain else 'No'}")
+                  EOF
+
+            - name: Trigger Retraining if Needed
+              id: check_retrain
+              run: |
+                  if [ "$(cat retrain.txt)" == "true" ]; then
+                    echo "::set-output name=retrain::true"
+                  else
+                    echo "::set-output name=retrain::false"
+                  fi
+
+    # Step 2: Model Training (Conditional)
     train_and_evaluate:
+        runs-on: ubuntu-latest
+        container:
+            image: python:3.9-slim
+
+        steps:
+            - uses: actions/checkout@v2
+
+            - name: Install system dependencies
+              run: |
+                  apt-get update
+                  apt-get install -y --no-install-recommends \
+                    build-essential \
+                    curl \
+                    git \
+                    libgl1-mesa-glx \
+                    libglib2.0-0
+
+            - name: Install Python dependencies
+              run: |
+                  python -m pip install --upgrade pip
+                  pip install virtualenv
+                  python -m virtualenv venv
+                  . venv/bin/activate
+                  pip install -r requirements.txt
+                  pip install matplotlib seaborn scikit-learn
+
+            - name: Train model
+              env:
+                  DAGSHUB_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
+                  DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
+                  MLFLOW_TRACKING_URI: "https://dagshub.com/salsazufar/project-akhir-mlops.mlflow"
+                  SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+                  SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+              run: |
+                  . venv/bin/activate
+                  python script/train.py
+
+            - name: Run evaluation
+              env:
+                  DAGSHUB_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
+                  DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
+                  MLFLOW_TRACKING_URI: "https://dagshub.com/salsazufar/project-akhir-mlops.mlflow"
+                  SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+                  SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+              run: |
+                  . venv/bin/activate
+                  python script/test.py
+
+            - name: Save model artifacts
+              uses: actions/upload-artifact@v2
+              with:
+                  name: model-artifacts
+                  path: |
+                      model/
+                      *.png
+                      *.json
+
+    # Step 3: Build and Push Final Docker Image with Model
+    build_and_push_docker:
+        runs-on: ubuntu-latest
+        needs: train_and_evaluate
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v2
+
+            - name: Log in to Docker Hub
+              uses: docker/login-action@v2
+              with:
+                  username: ${{ secrets.DOCKER_USERNAME }}
+                  password: ${{ secrets.DOCKER_PASSWORD }}
+
+            - name: Build Docker Image with Model
+              run: |
+                  docker build -t ${{ secrets.DOCKER_USERNAME }}/mlops_project:latest .
+
+            - name: Push Docker Image
+              run: |
+                  docker push ${{ secrets.DOCKER_USERNAME }}/mlops_project:latest
+
+    # Step 3: Model A/B Testing and Comparison
+    model_evaluation:
+        needs: train_and_evaluate
         runs-on: ubuntu-latest
         steps:
             - name: Checkout repository
@@ -18,48 +656,294 @@ jobs:
             - name: Set up Python
               uses: actions/setup-python@v2
               with:
-                  python-version: "3.9"
-
-            - name: Install system dependencies
-              run: |
-                  sudo apt-get update
-                  sudo apt-get install -y python3-dev python3-pip python3-venv
-
-            - name: Create and activate virtual environment
-              run: |
-                  python -m venv venv
-                  source venv/bin/activate
+                  python-version: "3.8"
 
             - name: Install dependencies
               run: |
-                  python -m pip install --upgrade pip
-                  pip install -r requirements.txt
+                  pip install mlflow scikit-learn pandas numpy requests
 
-            - name: Train model
+            - name: Perform Model Comparison
               env:
+                  MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
                   DAGSHUB_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
                   DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
-                  SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-                  SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-                  LOKI_URL: ${{ secrets.LOKI_URL }}
-                  LOKI_USERNAME: ${{ secrets.LOKI_USERNAME }}
+                  MLFLOW_TRACKING_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
+                  MLFLOW_TRACKING_PASSWORD: ${{ secrets.DAGSHUB_TOKEN }}
+              run: |
+                  # Create artifacts directory in workspace
+                  mkdir -p $GITHUB_WORKSPACE/mlflow_artifacts
+                  export MLFLOW_ARTIFACTS_DESTINATION=$GITHUB_WORKSPACE/mlflow_artifacts
+
+                  pip install mlflow scikit-learn pandas numpy requests
+                  python - << EOF
+                  import mlflow
+                  import json
+                  import pandas as pd
+                  import numpy as np
+                  from datetime import datetime, timedelta
+                  import os
+
+                  # Set MLflow tracking URI
+                  mlflow.set_tracking_uri(os.environ['MLFLOW_TRACKING_URI'])
+                  print(f"MLflow tracking URI: {mlflow.get_tracking_uri()}")
+                  print(f"MLflow artifact location: {os.environ.get('MLFLOW_ARTIFACTS_DESTINATION')}")
+
+                  # Get recent runs
+                  client = mlflow.tracking.MlflowClient()
+                  runs = client.search_runs(
+                      experiment_ids=["1"],
+                      order_by=["start_time DESC"],
+                      max_results=5
+                  )
+
+                  # Create comparison report
+                  report = {
+                      "best_model": {
+                          "run_id": "no_runs",
+                          "accuracy": 0,
+                          "improvement": 0
+                      },
+                      "trend": {
+                          "accuracy_trend": 0,
+                          "loss_trend": 0
+                      },
+                      "comparison": []
+                  }
+
+                  if runs:
+                      comparison_data = []
+                      for run in runs:
+                          metrics = {
+                              "run_id": run.info.run_id,
+                              "accuracy": run.data.metrics.get("test_accuracy", 0),
+                              "loss": run.data.metrics.get("test_loss", 0),
+                              "training_time": run.data.metrics.get("total_training_time", 0),
+                              "timestamp": run.info.start_time
+                          }
+                          comparison_data.append(metrics)
+                      
+                      df = pd.DataFrame(comparison_data)
+                      if not df.empty:
+                          best_accuracy_idx = df["accuracy"].idxmax()
+                          mean_accuracy = df["accuracy"].mean()
+                          
+                          report.update({
+                              "best_model": {
+                                  "run_id": df.loc[best_accuracy_idx, "run_id"],
+                                  "accuracy": float(df["accuracy"].max()),
+                                  "improvement": float(df["accuracy"].max() - mean_accuracy)
+                              },
+                              "trend": {
+                                  "accuracy_trend": float(df["accuracy"].diff().mean()) if len(df) > 1 else 0,
+                                  "loss_trend": float(df["loss"].diff().mean()) if len(df) > 1 else 0
+                              },
+                              "comparison": df.to_dict(orient="records")
+                          })
+
+                  # Save report for next steps
+                  report_path = os.path.join(os.environ['GITHUB_WORKSPACE'], 'model_comparison.json')
+                  with open(report_path, 'w') as f:
+                      json.dump(report, f, indent=2)
+
+                  # Print summary
+                  print("\n📊 Model Comparison Summary:")
+                  print(f"Best Model Run ID: {report['best_model']['run_id']}")
+                  print(f"Best Accuracy: {report['best_model']['accuracy']:.4f}")
+                  print(f"Improvement: {report['best_model']['improvement']:.4f}")
+                  print(f"Accuracy Trend: {report['trend']['accuracy_trend']:.4f}")
+                  EOF
+
+            - name: Perform A/B Testing Analysis
+              run: |
+                  python - << EOF
+                  import json
+                  import numpy as np
+                  from scipy import stats
+
+                  # Load comparison data
+                  with open("model_comparison.json", "r") as f:
+                      comparison_data = json.load(f)
+
+                  # Initialize default results
+                  ab_results = {
+                      "t_statistic": 0,
+                      "p_value": 1,
+                      "significant_difference": False,
+                      "better_model": "None",
+                      "improvement_percentage": 0
+                  }
+
+                  # Only perform A/B testing if we have enough models
+                  if len(comparison_data["comparison"]) >= 2:
+                      # Get latest two models for A/B testing
+                      model_a = comparison_data["comparison"][1]  # Previous model
+                      model_b = comparison_data["comparison"][0]  # New model
+
+                      # Perform statistical test
+                      n_samples = 1000
+                      a_predictions = np.random.binomial(1, model_a["accuracy"], n_samples)
+                      b_predictions = np.random.binomial(1, model_b["accuracy"], n_samples)
+                      
+                      # Perform t-test
+                      t_stat, p_value = stats.ttest_ind(a_predictions, b_predictions)
+                      
+                      ab_results = {
+                          "t_statistic": float(t_stat),
+                          "p_value": float(p_value),
+                          "significant_difference": p_value < 0.05,
+                          "better_model": "B" if model_b["accuracy"] > model_a["accuracy"] else "A",
+                          "improvement_percentage": ((model_b["accuracy"] - model_a["accuracy"]) / model_a["accuracy"]) * 100 if model_a["accuracy"] > 0 else 0
+                      }
+
+                  # Save results
+                  with open("ab_test_results.json", "w") as f:
+                      json.dump(ab_results, f, indent=2)
+
+                  # Print results
+                  print("\n🔬 A/B Testing Results:")
+                  print(f"Statistical Significance: {'Yes' if ab_results['significant_difference'] else 'No'}")
+                  print(f"Better Model: Model {ab_results['better_model']}")
+                  print(f"Improvement: {ab_results['improvement_percentage']:.2f}%")
+                  print(f"P-value: {ab_results['p_value']:.4f}")
+                  EOF
+
+            - name: Log Results to Loki
+              env:
                   LOKI_API_KEY: ${{ secrets.LOKI_API_KEY }}
+                  LOKI_USERNAME: "1050298"
+                  LOKI_URL: ${{ secrets.LOKI_URL }}
               run: |
-                  source venv/bin/activate
-                  python script/train.py
+                  python - << EOF
+                  import requests
+                  import json
+                  import time
+                  import os
+                  from datetime import datetime
 
-            - name: Run tests
-              env:
-                  DAGSHUB_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
-                  DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
-                  SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-                  SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-              run: |
-                  source venv/bin/activate
-                  python script/test.py
+                  def send_log_to_loki(message, data, level="info"):
+                      timestamp = int(time.time() * 1e9)
+                      
+                      # Flatten metrics for better visualization
+                      if isinstance(data, dict) and "comparison" in data:
+                          for model in data["comparison"]:
+                              model_payload = {
+                                  "streams": [{
+                                      "stream": {
+                                          "job": "mlops_training",
+                                          "environment": "github_actions",
+                                          "component": "model_metrics",
+                                          "level": level,
+                                          "metric_type": "model_performance"
+                                      },
+                                      "values": [
+                                          [str(timestamp), json.dumps({
+                                              "message": "Model Performance Metrics",
+                                              "run_id": model["run_id"],
+                                              "accuracy": model["accuracy"],
+                                              "loss": model["loss"],
+                                              "training_time": model["training_time"],
+                                              "timestamp": datetime.fromtimestamp(model["timestamp"]/1000).strftime("%Y-%m-%d %H:%M:%S")
+                                          })]
+                                      ]
+                                  }]
+                              }
+                              
+                              response = requests.post(
+                                  f"{os.environ['LOKI_URL']}/loki/api/v1/push",
+                                  json=model_payload,
+                                  auth=(os.environ['LOKI_USERNAME'], os.environ['LOKI_API_KEY']),
+                                  headers={"Content-Type": "application/json"}
+                              )
+                              if response.status_code != 204:
+                                  print(f"Failed to send model metrics: {response.text}")
 
-            - name: Upload model artifacts
-              uses: actions/upload-artifact@v2
-              with:
-                  name: model-artifacts
-                  path: model/
+                      # Send trend analysis
+                      if isinstance(data, dict) and "trend" in data:
+                          trend_payload = {
+                              "streams": [{
+                                  "stream": {
+                                      "job": "mlops_training",
+                                      "environment": "github_actions",
+                                      "component": "model_trends",
+                                      "level": level,
+                                      "metric_type": "performance_trend"
+                                  },
+                                  "values": [
+                                      [str(timestamp), json.dumps({
+                                          "message": "Model Performance Trends",
+                                          "accuracy_trend": data["trend"]["accuracy_trend"],
+                                          "loss_trend": data["trend"]["loss_trend"],
+                                          "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                      })]
+                                  ]
+                              }]
+                          }
+                          
+                          response = requests.post(
+                              f"{os.environ['LOKI_URL']}/loki/api/v1/push",
+                              json=trend_payload,
+                              auth=(os.environ['LOKI_USERNAME'], os.environ['LOKI_API_KEY']),
+                              headers={"Content-Type": "application/json"}
+                          )
+                          if response.status_code != 204:
+                              print(f"Failed to send trend metrics: {response.text}")
+
+                      # Send A/B test results if available
+                      if message == "A/B Testing Results":
+                          ab_payload = {
+                              "streams": [{
+                                  "stream": {
+                                      "job": "mlops_training",
+                                      "environment": "github_actions",
+                                      "component": "ab_testing",
+                                      "level": level,
+                                      "metric_type": "ab_test"
+                                  },
+                                  "values": [
+                                      [str(timestamp), json.dumps({
+                                          "message": "A/B Test Results",
+                                          "improvement_percentage": data["improvement_percentage"],
+                                          "significant_difference": data["significant_difference"],
+                                          "better_model": data["better_model"],
+                                          "p_value": data["p_value"],
+                                          "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                      })]
+                                  ]
+                              }]
+                          }
+                          
+                          response = requests.post(
+                              f"{os.environ['LOKI_URL']}/loki/api/v1/push",
+                              json=ab_payload,
+                              auth=(os.environ['LOKI_USERNAME'], os.environ['LOKI_API_KEY']),
+                              headers={"Content-Type": "application/json"}
+                          )
+                          if response.status_code != 204:
+                              print(f"Failed to send A/B test results: {response.text}")
+
+                  print("📊 Sending model comparison results to Loki...")
+                  with open("model_comparison.json", "r") as f:
+                      comparison_results = json.load(f)
+                  send_log_to_loki(
+                      "Model Comparison Results",
+                      comparison_results,
+                      "info"
+                  )
+
+                  print("🔬 Sending A/B testing results to Loki...")
+                  with open("ab_test_results.json", "r") as f:
+                      ab_results = json.load(f)
+                  send_log_to_loki(
+                      "A/B Testing Results",
+                      ab_results,
+                      "info"
+                  )
+
+                  print("\n📈 To view visualizations in Grafana, use these queries:")
+                  print("\n1. Model Performance Metrics:")
+                  print('   {job="mlops_training", component="model_metrics"} | json | line_format "{{.accuracy}}" | avg_over_time[1h]')
+                  print("\n2. Performance Trends:")
+                  print('   {job="mlops_training", component="model_trends"} | json | line_format "{{.accuracy_trend}}"')
+                  print("\n3. A/B Test Results:")
+                  print('   {job="mlops_training", component="ab_testing"} | json | line_format "{{.improvement_percentage}}"')
+                  EOF
