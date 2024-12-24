@@ -24,32 +24,61 @@ jobs:
             - name: Create virtual environment
               run: python -m venv venv
 
-            - name: Activate virtual environment
+            - name: Activate virtual environment and install base dependencies
               run: |
                   source venv/bin/activate
                   python -m pip install --upgrade pip setuptools wheel
 
-            - name: Install dependencies
+            - name: Install PyTorch
               run: |
-                  pip install -r requirements-deploy.txt --no-cache-dir
+                  source venv/bin/activate
+                  pip install torch==1.13.1+cpu torchvision==0.14.1+cpu --extra-index-url https://download.pytorch.org/whl/cpu
+
+            - name: Install other dependencies
+              run: |
+                  source venv/bin/activate
+                  pip install fastapi==0.109.0 \
+                            uvicorn==0.25.0 \
+                            Pillow>=9.5.0 \
+                            python-dotenv==1.0.0 \
+                            python-multipart==0.0.6 \
+                            numpy>=1.21.0 \
+                            scikit-learn>=1.0.0
 
             - name: Verify dependencies
               run: |
+                  source venv/bin/activate
+                  echo "Checking PyTorch installation..."
                   python -c "import torch; print(f'PyTorch version: {torch.__version__}')"
+                  echo "Checking NumPy installation..."
                   python -c "import numpy; print(f'NumPy version: {numpy.__version__}')"
+                  echo "Checking other dependencies..."
+                  pip freeze
 
             - name: Install Vercel CLI
               run: npm install --global vercel@latest
 
-            - name: Create .vercel directory if not exists
-              run: mkdir -p .vercel
+            - name: Create deployment directory
+              run: |
+                  mkdir -p .vercel
+                  mkdir -p deployment
+                  cp -r script deployment/
+                  cp requirements-deploy.txt deployment/
+                  cp vercel.json deployment/
 
             - name: Deploy to Vercel
               env:
                   VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
                   VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
                   VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+              working-directory: ./deployment
               run: |
                   vercel pull --yes --environment=production --token=$VERCEL_TOKEN
-                  vercel build --prod --token=$VERCEL_TOKEN
-                  vercel deploy --prod --token=$VERCEL_TOKEN --skip-build
+                  vercel build --prod --token=$VERCEL_TOKEN || (echo "Build failed" && exit 1)
+                  vercel deploy --prebuilt --prod --token=$VERCEL_TOKEN
+
+            - name: Cleanup
+              if: always()
+              run: |
+                  rm -rf venv
+                  rm -rf deployment

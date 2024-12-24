@@ -5,4 +5,13 @@ __pycache__
 .env
 .env.*
 dataset
-*.log 
+*.log
+*.pytest_cache
+*.coverage
+*.mypy_cache
+*.egg-info
+build/
+dist/
+.tox/
+.idea/
+.vscode/ 
