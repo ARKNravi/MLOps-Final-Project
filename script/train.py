@@ -18,6 +18,7 @@ import snappy as python_snappy
 from remote_write_pb2 import WriteRequest, TimeSeries, Label, Sample
 import time
 import json
+from supabase import create_client, Client
 
 # MLflow configuration
 MLFLOW_TRACKING_URI = "https://dagshub.com/salsazufar/project-akhir-mlops.mlflow"
@@ -223,6 +224,30 @@ def send_log_to_loki(log_message, log_level="info", labels=None, numeric_values=
         print(f"Error sending log to Loki: {e}")
         return False
 
+# Supabase configuration
+supabase: Client = create_client(
+    os.environ.get("SUPABASE_URL", ""),
+    os.environ.get("SUPABASE_KEY", "")
+)
+
+def save_metrics_to_supabase(metrics, phase="train"):
+    """Save metrics to Supabase for tracking"""
+    try:
+        data = {
+            "phase": phase,
+            "timestamp": datetime.now().isoformat(),
+            "metrics": metrics,
+            "run_id": os.environ.get("GITHUB_RUN_ID", "local"),
+            "commit_sha": os.environ.get("GITHUB_SHA", "local")
+        }
+        
+        result = supabase.table("model_metrics").insert(data).execute()
+        print(f"Saved {phase} metrics to Supabase")
+        return True
+    except Exception as e:
+        print(f"Error saving metrics to Supabase: {e}")
+        return False
+
 # Training function
 def train_model(model, train_loader, val_loader, criterion, optimizer, num_epochs, device):
     # Set debug mode for quick training
@@ -270,6 +295,12 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
         avg_train_loss = running_loss / batch_count
         train_losses.append(avg_train_loss)
         
+        # Save training metrics to Supabase
+        save_metrics_to_supabase({
+            "loss": avg_train_loss,
+            "epoch": epoch + 1
+        }, phase="train")
+        
         # Validation phase
         model.eval()
         val_loss = 0.0
@@ -299,6 +330,13 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
         avg_val_loss = val_loss / batch_count
         val_accuracy = 100 * val_correct / val_total
         val_losses.append(avg_val_loss)
+        
+        # Save validation metrics to Supabase
+        save_metrics_to_supabase({
+            "loss": avg_val_loss,
+            "accuracy": val_accuracy,
+            "epoch": epoch + 1
+        }, phase="validation")
         
         print(f'Epoch [{epoch+1}/{num_epochs}]:')
         print(f'Train Loss: {avg_train_loss:.4f}')

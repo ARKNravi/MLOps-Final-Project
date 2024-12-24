@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
-from train import initialize_model, device  # Importing from train.py
+from train import initialize_model, device, save_metrics_to_supabase  # Import save_metrics_to_supabase from train.py
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.metrics import confusion_matrix
@@ -118,6 +118,12 @@ def computeTestSetAccuracyAndLogConfusionMatrix(model, criterion, dataloader, cl
         # Log metrics to MLflow
         mlflow.log_metric("test_loss", avg_loss)
         mlflow.log_metric("test_accuracy", avg_accuracy)
+
+        # Save test metrics to Supabase
+        save_metrics_to_supabase({
+            "loss": float(avg_loss),
+            "accuracy": float(avg_accuracy)
+        }, phase="test")
 
         # Log confusion matrix as an artifact
         log_confusion_matrix(y_true, y_pred, class_names)
