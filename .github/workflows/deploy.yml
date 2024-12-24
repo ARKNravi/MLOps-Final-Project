@@ -1,4 +1,4 @@
-name: Deploy to Streamlit Cloud
+name: Update Repository for Streamlit Cloud
 
 on:
     workflow_run:
@@ -7,7 +7,7 @@ on:
             - completed
 
 jobs:
-    deploy:
+    update-repo:
         runs-on: ubuntu-latest
         if: ${{ github.event.workflow_run.conclusion == 'success' }}
 
@@ -15,40 +15,34 @@ jobs:
             - name: Checkout repository
               uses: actions/checkout@v2
 
-            - name: Setup Python
-              uses: actions/setup-python@v2
-              with:
-                  python-version: "3.8"
-
-            - name: Install dependencies
+            - name: Create .streamlit config
               run: |
-                  pip install -r requirements-deploy.txt
+                  mkdir -p .streamlit
+                  echo "[theme]" > .streamlit/config.toml
+                  echo "primaryColor = '#795548'" >> .streamlit/config.toml
+                  echo "backgroundColor = '#FFFFFF'" >> .streamlit/config.toml
+                  echo "secondaryBackgroundColor = '#F5F5F5'" >> .streamlit/config.toml
+                  echo "textColor = '#262730'" >> .streamlit/config.toml
+                  echo "font = 'sans serif'" >> .streamlit/config.toml
 
             - name: Create Streamlit secrets
               env:
                   SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
                   SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
               run: |
-                  mkdir -p ~/.streamlit
-                  echo "[server]" > ~/.streamlit/config.toml
-                  echo "headless = true" >> ~/.streamlit/config.toml
-                  echo "enableCORS = false" >> ~/.streamlit/config.toml
-                  echo "[theme]" >> ~/.streamlit/config.toml
-                  echo "primaryColor = '#795548'" >> ~/.streamlit/config.toml
-                  echo "backgroundColor = '#FFFFFF'" >> ~/.streamlit/config.toml
-                  echo "secondaryBackgroundColor = '#F5F5F5'" >> ~/.streamlit/config.toml
-                  echo "textColor = '#262730'" >> ~/.streamlit/config.toml
-                  echo "font = 'sans serif'" >> ~/.streamlit/config.toml
+                  mkdir -p .streamlit
+                  echo "# Supabase credentials" > .streamlit/secrets.toml
+                  echo "supabase_url = \"$SUPABASE_URL\"" >> .streamlit/secrets.toml
+                  echo "supabase_key = \"$SUPABASE_KEY\"" >> .streamlit/secrets.toml
+                  echo "" >> .streamlit/secrets.toml
+                  echo "[connections.supabase]" >> .streamlit/secrets.toml
+                  echo "url = \"$SUPABASE_URL\"" >> .streamlit/secrets.toml
+                  echo "key = \"$SUPABASE_KEY\"" >> .streamlit/secrets.toml
 
-                  # Create secrets.toml
-                  echo "[connections.supabase]" > ~/.streamlit/secrets.toml
-                  echo "url = \"$SUPABASE_URL\"" >> ~/.streamlit/secrets.toml
-                  echo "key = \"$SUPABASE_KEY\"" >> ~/.streamlit/secrets.toml
-
-            - name: Deploy to Streamlit Cloud
-              uses: streamlit/streamlit-deploy@v1
-              with:
-                  app-name: coffee-bean-classifier
-                  streamlit-credentials-toml: |
-                      [general]
-                      gitHubAccessToken = "${{ secrets.STREAMLIT_GITHUB_TOKEN }}"
+            - name: Commit and push if there are changes
+              run: |
+                  git config --local user.email "action@github.com"
+                  git config --local user.name "GitHub Action"
+                  git add .streamlit/
+                  git commit -m "chore: update streamlit config" || echo "No changes to commit"
+                  git push
