@@ -411,6 +411,10 @@ jobs:
                   git commit -m "feat(data): Track dataset with DVC"
 
             - name: Push dataset to DVC remote
+              env:
+                  LOKI_API_KEY: ${{ secrets.LOKI_API_KEY }}
+                  LOKI_USERNAME: "1050298"
+                  LOKI_URL: ${{ secrets.LOKI_URL }}
               run: |
                   echo "🔄 Starting DVC push..."
 
