@@ -594,7 +594,7 @@ jobs:
 
             - name: Install Prometheus Dependencies
               run: |
-                  sudo apt-get update && sudo apt-get install -y python3-pip python-snappy
+                  sudo apt-get update && sudo apt-get install -y python3-pip libsnappy-dev
                   sudo apt-get install -y protobuf-compiler
                   pip3 install prometheus-client requests python-snappy protobuf supabase==2.3.0 mlflow
 
