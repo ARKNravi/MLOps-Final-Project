@@ -210,9 +210,9 @@ jobs:
                       timestamp = int(time.time() * 1e9)
                       payload = {
                           "streams": [{
-                              "stream": {
-                                  "job": "mlops_training",
-                                  "environment": "github_actions",
+                          "stream": {
+                            "job": "mlops_training",
+                            "environment": "github_actions",
                                   "level": "info",
                                   "test": "true",
                                   "component": "connection_test"
@@ -356,28 +356,142 @@ jobs:
 
                   echo "\n✨ Loki test completed"
 
-    # Step 1: Build Base Image with Dependencies
-    build_and_cache_dependencies:
+    # Step 1: Data Versioning and Model Management
+    data_versioning:
         runs-on: ubuntu-latest
         steps:
             - name: Checkout repository
               uses: actions/checkout@v2
-
-            - name: Log in to Docker Hub
-              uses: docker/login-action@v2
               with:
-                  username: ${{ secrets.DOCKER_USERNAME }}
-                  password: ${{ secrets.DOCKER_PASSWORD }}
+                  fetch-depth: 0
 
-            - name: Build and Push Dependency Image
+            - name: Set up Python
+              uses: actions/setup-python@v2
+              with:
+                  python-version: "3.8"
+
+            - name: Install DVC
               run: |
-                  docker build -t ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest .
-                  docker push ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest
+                  pip install dvc[s3]
+                  pip install dvclive
 
-    # Step 2: Training and Evaluating Model with Prometheus and Grafana
+            - name: Configure DVC remote
+              env:
+                  SUPABASE_S3_ACCESS_KEY_ID: ${{ secrets.SUPABASE_S3_ACCESS_KEY_ID }}
+                  SUPABASE_S3_SECRET_ACCESS_KEY: ${{ secrets.SUPABASE_S3_SECRET_ACCESS_KEY }}
+              run: |
+                  dvc init --no-scm
+                  dvc remote add -d storage s3://zyzahbhyrgrsakuwwdjr/mlops-data
+                  dvc remote modify storage endpointurl https://zyzahbhyrgrsakuwwdjr.supabase.co/storage/v1/s3
+                  dvc remote modify storage access_key_id ${SUPABASE_S3_ACCESS_KEY_ID}
+                  dvc remote modify storage secret_access_key ${SUPABASE_S3_SECRET_ACCESS_KEY}
+                  dvc remote modify storage region ap-southeast-1
+
+            - name: Track dataset with DVC
+              run: |
+                  dvc add dataset/
+                  git add dataset.dvc .gitignore
+                  git config --global user.email "github-actions@github.com"
+                  git config --global user.name "GitHub Actions"
+                  git commit -m "feat(data): Track dataset with DVC"
+
+            - name: Push dataset to DVC remote
+              run: dvc push
+
+            # Model Performance Tracking
+            - name: Setup MLflow for Model Comparison
+              env:
+                  MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+                  DAGSHUB_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
+                  DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
+              run: |
+                  pip install mlflow scikit-learn
+                  python - << EOF
+                  import mlflow
+                  import json
+                  from datetime import datetime
+
+                  # Set MLflow tracking URI
+                  mlflow.set_tracking_uri("$MLFLOW_TRACKING_URI")
+
+                  # Get latest model metrics
+                  client = mlflow.tracking.MlflowClient()
+                  latest_run = client.search_runs(
+                      experiment_ids=["1"],
+                      order_by=["start_time DESC"],
+                      max_results=1
+                  )[0]
+
+                  # Save metrics for comparison
+                  metrics = {
+                      "accuracy": latest_run.data.metrics.get("test_accuracy", 0),
+                      "loss": latest_run.data.metrics.get("test_loss", 0),
+                      "timestamp": datetime.now().isoformat()
+                  }
+
+                  with open("model_metrics.json", "w") as f:
+                      json.dump(metrics, f)
+                  EOF
+
+            # Model Drift Detection
+            - name: Check Model Drift
+              run: |
+                  python - << EOF
+                  import json
+                  import os
+                  from datetime import datetime, timedelta
+
+                  def should_retrain(current_metrics, threshold=0.05):
+                      try:
+                          with open("previous_metrics.json", "r") as f:
+                              previous_metrics = json.load(f)
+                              
+                          accuracy_diff = abs(current_metrics["accuracy"] - previous_metrics["accuracy"])
+                          if accuracy_diff > threshold:
+                              print(f"Model drift detected: Accuracy difference of {accuracy_diff}")
+                              return True
+                              
+                          prev_time = datetime.fromisoformat(previous_metrics["timestamp"])
+                          current_time = datetime.fromisoformat(current_metrics["timestamp"])
+                          if (current_time - prev_time) > timedelta(days=7):
+                              print("Weekly retraining triggered")
+                              return True
+                              
+                          return False
+                          
+                      except FileNotFoundError:
+                          print("No previous metrics found, saving current metrics")
+                          return False
+
+                  with open("model_metrics.json", "r") as f:
+                      current_metrics = json.load(f)
+
+                  if should_retrain(current_metrics):
+                      with open("retrain.txt", "w") as f:
+                          f.write("true")
+                  else:
+                      with open("retrain.txt", "w") as f:
+                          f.write("false")
+
+                  # Save current metrics as previous metrics for next comparison
+                  with open("previous_metrics.json", "w") as f:
+                      json.dump(current_metrics, f)
+                  EOF
+
+            - name: Trigger Retraining if Needed
+              id: check_retrain
+              run: |
+                  if [ "$(cat retrain.txt)" == "true" ]; then
+                    echo "::set-output name=retrain::true"
+                  else
+                    echo "::set-output name=retrain::false"
+                  fi
+
+    # Step 2: Model Training (Conditional)
     train_and_evaluate:
+        needs: data_versioning
+        if: needs.data_versioning.outputs.retrain == 'true' || github.event_name == 'push'
         runs-on: ubuntu-latest
-        needs: build_and_cache_dependencies
         steps:
             - name: Checkout repository
               uses: actions/checkout@v2
@@ -478,3 +592,280 @@ jobs:
             - name: Push Docker Image
               run: |
                   docker push ${{ secrets.DOCKER_USERNAME }}/mlops_project:latest
+
+    # Step 3: Model A/B Testing and Comparison
+    model_evaluation:
+        needs: train_and_evaluate
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v2
+
+            - name: Set up Python
+              uses: actions/setup-python@v2
+              with:
+                  python-version: "3.8"
+
+            - name: Install dependencies
+              run: |
+                  pip install mlflow scikit-learn pandas numpy requests
+
+            - name: Perform Model Comparison
+              env:
+                  MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+                  DAGSHUB_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
+                  DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
+              run: |
+                  python - << EOF
+                  import mlflow
+                  import json
+                  import pandas as pd
+                  from datetime import datetime, timedelta
+
+                  # Set MLflow tracking URI
+                  mlflow.set_tracking_uri("$MLFLOW_TRACKING_URI")
+                  client = mlflow.tracking.MlflowClient()
+
+                  # Get recent runs
+                  runs = client.search_runs(
+                      experiment_ids=["1"],
+                      order_by=["start_time DESC"],
+                      max_results=5
+                  )
+
+                  # Collect metrics for comparison
+                  comparison_data = []
+                  for run in runs:
+                      metrics = {
+                          "run_id": run.info.run_id,
+                          "accuracy": run.data.metrics.get("test_accuracy", 0),
+                          "loss": run.data.metrics.get("test_loss", 0),
+                          "training_time": run.data.metrics.get("total_training_time", 0),
+                          "timestamp": run.info.start_time,
+                      }
+                      comparison_data.append(metrics)
+
+                  # Create comparison report
+                  df = pd.DataFrame(comparison_data)
+                  report = {
+                      "best_model": {
+                          "run_id": df.loc[df["accuracy"].idxmax(), "run_id"],
+                          "accuracy": df["accuracy"].max(),
+                          "improvement": float(df["accuracy"].max() - df["accuracy"].mean())
+                      },
+                      "trend": {
+                          "accuracy_trend": float(df["accuracy"].diff().mean()),
+                          "loss_trend": float(df["loss"].diff().mean())
+                      },
+                      "comparison": df.to_dict(orient="records")
+                  }
+
+                  # Save comparison report
+                  with open("model_comparison.json", "w") as f:
+                      json.dump(report, f, indent=2)
+
+                  # Log comparison to MLflow
+                  with mlflow.start_run(run_name="model_comparison"):
+                      mlflow.log_metrics({
+                          "best_accuracy": report["best_model"]["accuracy"],
+                          "accuracy_improvement": report["best_model"]["improvement"],
+                          "accuracy_trend": report["trend"]["accuracy_trend"]
+                      })
+                      mlflow.log_artifact("model_comparison.json")
+
+                  # Print summary
+                  print("\n📊 Model Comparison Summary:")
+                  print(f"Best Model Run ID: {report['best_model']['run_id']}")
+                  print(f"Best Accuracy: {report['best_model']['accuracy']:.4f}")
+                  print(f"Improvement: {report['best_model']['improvement']:.4f}")
+                  print(f"Accuracy Trend: {report['trend']['accuracy_trend']:.4f}")
+                  EOF
+
+            - name: Perform A/B Testing Analysis
+              run: |
+                  python - << EOF
+                  import json
+                  import numpy as np
+                  from scipy import stats
+
+                  # Load comparison data
+                  with open("model_comparison.json", "r") as f:
+                      comparison_data = json.load(f)
+
+                  # Get latest two models for A/B testing
+                  model_a = comparison_data["comparison"][1]  # Previous model
+                  model_b = comparison_data["comparison"][0]  # New model
+
+                  # Perform statistical test
+                  def ab_test_analysis(model_a, model_b):
+                      # Simulate predictions based on accuracy
+                      n_samples = 1000
+                      a_predictions = np.random.binomial(1, model_a["accuracy"], n_samples)
+                      b_predictions = np.random.binomial(1, model_b["accuracy"], n_samples)
+                      
+                      # Perform t-test
+                      t_stat, p_value = stats.ttest_ind(a_predictions, b_predictions)
+                      
+                      return {
+                          "t_statistic": float(t_stat),
+                          "p_value": float(p_value),
+                          "significant_difference": p_value < 0.05,
+                          "better_model": "B" if model_b["accuracy"] > model_a["accuracy"] else "A",
+                          "improvement_percentage": ((model_b["accuracy"] - model_a["accuracy"]) / model_a["accuracy"]) * 100
+                      }
+
+                  # Run A/B testing analysis
+                  ab_results = ab_test_analysis(model_a, model_b)
+
+                  # Save results
+                  with open("ab_test_results.json", "w") as f:
+                      json.dump(ab_results, f, indent=2)
+
+                  # Print results
+                  print("\n🔬 A/B Testing Results:")
+                  print(f"Statistical Significance: {'Yes' if ab_results['significant_difference'] else 'No'}")
+                  print(f"Better Model: Model {ab_results['better_model']}")
+                  print(f"Improvement: {ab_results['improvement_percentage']:.2f}%")
+                  print(f"P-value: {ab_results['p_value']:.4f}")
+                  EOF
+
+            - name: Log Results to Loki
+              env:
+                  LOKI_API_KEY: ${{ secrets.LOKI_API_KEY }}
+                  LOKI_USERNAME: "1050298"
+                  LOKI_URL: ${{ secrets.LOKI_URL }}
+              run: |
+                  python - << EOF
+                  import requests
+                  import json
+                  import time
+                  import os
+                  from datetime import datetime
+
+                  def send_log_to_loki(message, data, level="info"):
+                      timestamp = int(time.time() * 1e9)
+                      
+                      # Flatten metrics for better visualization
+                      if isinstance(data, dict) and "comparison" in data:
+                          for model in data["comparison"]:
+                              model_payload = {
+                                  "streams": [{
+                                      "stream": {
+                                          "job": "mlops_training",
+                                          "environment": "github_actions",
+                                          "component": "model_metrics",
+                                          "level": level,
+                                          "metric_type": "model_performance"
+                                      },
+                                      "values": [
+                                          [str(timestamp), json.dumps({
+                                              "message": "Model Performance Metrics",
+                                              "run_id": model["run_id"],
+                                              "accuracy": model["accuracy"],
+                                              "loss": model["loss"],
+                                              "training_time": model["training_time"],
+                                              "timestamp": datetime.fromtimestamp(model["timestamp"]/1000).strftime("%Y-%m-%d %H:%M:%S")
+                                          })]
+                                      ]
+                                  }]
+                              }
+                              
+                              response = requests.post(
+                                  f"{os.environ['LOKI_URL']}/loki/api/v1/push",
+                                  json=model_payload,
+                                  auth=(os.environ['LOKI_USERNAME'], os.environ['LOKI_API_KEY']),
+                                  headers={"Content-Type": "application/json"}
+                              )
+                              if response.status_code != 204:
+                                  print(f"Failed to send model metrics: {response.text}")
+
+                      # Send trend analysis
+                      if isinstance(data, dict) and "trend" in data:
+                          trend_payload = {
+                              "streams": [{
+                                  "stream": {
+                                      "job": "mlops_training",
+                                      "environment": "github_actions",
+                                      "component": "model_trends",
+                                      "level": level,
+                                      "metric_type": "performance_trend"
+                                  },
+                                  "values": [
+                                      [str(timestamp), json.dumps({
+                                          "message": "Model Performance Trends",
+                                          "accuracy_trend": data["trend"]["accuracy_trend"],
+                                          "loss_trend": data["trend"]["loss_trend"],
+                                          "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                      })]
+                                  ]
+                              }]
+                          }
+                          
+                          response = requests.post(
+                              f"{os.environ['LOKI_URL']}/loki/api/v1/push",
+                              json=trend_payload,
+                              auth=(os.environ['LOKI_USERNAME'], os.environ['LOKI_API_KEY']),
+                              headers={"Content-Type": "application/json"}
+                          )
+                          if response.status_code != 204:
+                              print(f"Failed to send trend metrics: {response.text}")
+
+                      # Send A/B test results if available
+                      if message == "A/B Testing Results":
+                          ab_payload = {
+                              "streams": [{
+                                  "stream": {
+                                      "job": "mlops_training",
+                                      "environment": "github_actions",
+                                      "component": "ab_testing",
+                                      "level": level,
+                                      "metric_type": "ab_test"
+                                  },
+                                  "values": [
+                                      [str(timestamp), json.dumps({
+                                          "message": "A/B Test Results",
+                                          "improvement_percentage": data["improvement_percentage"],
+                                          "significant_difference": data["significant_difference"],
+                                          "better_model": data["better_model"],
+                                          "p_value": data["p_value"],
+                                          "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                      })]
+                                  ]
+                              }]
+                          }
+                          
+                          response = requests.post(
+                              f"{os.environ['LOKI_URL']}/loki/api/v1/push",
+                              json=ab_payload,
+                              auth=(os.environ['LOKI_USERNAME'], os.environ['LOKI_API_KEY']),
+                              headers={"Content-Type": "application/json"}
+                          )
+                          if response.status_code != 204:
+                              print(f"Failed to send A/B test results: {response.text}")
+
+                  print("📊 Sending model comparison results to Loki...")
+                  with open("model_comparison.json", "r") as f:
+                      comparison_results = json.load(f)
+                  send_log_to_loki(
+                      "Model Comparison Results",
+                      comparison_results,
+                      "info"
+                  )
+
+                  print("🔬 Sending A/B testing results to Loki...")
+                  with open("ab_test_results.json", "r") as f:
+                      ab_results = json.load(f)
+                  send_log_to_loki(
+                      "A/B Testing Results",
+                      ab_results,
+                      "info"
+                  )
+
+                  print("\n📈 To view visualizations in Grafana, use these queries:")
+                  print("\n1. Model Performance Metrics:")
+                  print('   {job="mlops_training", component="model_metrics"} | json | line_format "{{.accuracy}}" | avg_over_time[1h]')
+                  print("\n2. Performance Trends:")
+                  print('   {job="mlops_training", component="model_trends"} | json | line_format "{{.accuracy_trend}}"')
+                  print("\n3. A/B Test Results:")
+                  print('   {job="mlops_training", component="ab_testing"} | json | line_format "{{.improvement_percentage}}"')
+                  EOF
