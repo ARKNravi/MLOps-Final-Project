@@ -1,4 +1,6 @@
-channels:
+logs:
+    - log_level: DEBUG
+    - log_file: mlflow.logchannels:
     - conda-forge
 dependencies:
     - python=3.12.4

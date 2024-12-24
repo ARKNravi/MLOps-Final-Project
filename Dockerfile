@@ -19,7 +19,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Install additional dependencies
-RUN pip install --no-cache-dir supabase-py
+RUN pip install --no-cache-dir supabase==1.0.3
 
 # Copy the rest of the application
 COPY . .

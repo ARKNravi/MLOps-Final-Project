@@ -712,7 +712,7 @@ jobs:
               run: |
                   sudo apt-get update && sudo apt-get install -y python3-pip
                   sudo apt-get install -y protobuf-compiler
-                  pip3 install prometheus-client requests python-snappy protobuf supabase-py
+                  pip3 install prometheus-client requests python-snappy protobuf supabase==1.0.3
 
                   # Setup Prometheus proto file
                   cat > remote_write.proto << EOF
@@ -783,7 +783,7 @@ jobs:
                       ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest \
                       bash -c "
                         echo 'Installing additional dependencies...' &&
-                        pip install supabase-py &&
+                        pip install supabase==1.0.3 &&
                         echo 'Starting training...' &&
                         python script/train.py &&
                         python script/test.py
