@@ -322,9 +322,29 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
 
 # Main script
 if __name__ == "__main__":
+    # Initialize model and move to device
     model = initialize_model(num_classes).to(device)
+    
+    # Define loss function and optimizer
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(model.parameters(), lr=learning_rate, momentum=momentum)
     exp_lr_scheduler = lr_scheduler.StepLR(optimizer, step_size=scheduler_step_size, gamma=scheduler_gamma)
-
-    model = train_model(model, criterion, optimizer, exp_lr_scheduler, num_epochs)
+    
+    # Create data loaders
+    dataloaders = {
+        'train': torch.utils.data.DataLoader(datasets['train'], batch_size=batch_size, shuffle=True),
+        'val': torch.utils.data.DataLoader(datasets['val'], batch_size=batch_size, shuffle=False)
+    }
+    
+    # Train the model
+    train_losses, val_losses = train_model(
+        model=model,
+        train_loader=dataloaders['train'],
+        val_loader=dataloaders['val'],
+        criterion=criterion,
+        optimizer=optimizer,
+        num_epochs=num_epochs,
+        device=device
+    )
+    
+    print("Training completed!")
