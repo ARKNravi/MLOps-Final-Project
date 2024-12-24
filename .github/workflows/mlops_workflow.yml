@@ -592,7 +592,7 @@ jobs:
                   python - << EOF
                   import json
                   import os
-                  from datetime import datetime, timedelta
+                  from datetime import datetime, timedelta, timezone
                   from supabase import create_client, Client
 
                   def get_historical_metrics():
@@ -612,16 +612,24 @@ jobs:
 
                   def parse_timestamp(ts_str):
                       try:
+                          # Handle various timestamp formats
+                          if isinstance(ts_str, (int, float)):
+                              # Convert Unix timestamp to datetime
+                              return datetime.fromtimestamp(ts_str, tz=timezone.utc)
+                          
                           # Remove microseconds if present
                           if '.' in ts_str:
                               ts_str = ts_str.split('.')[0]
-                          # Add UTC timezone if not present
-                          if '+' not in ts_str:
-                              ts_str += '+00:00'
-                          return datetime.fromisoformat(ts_str)
+                          
+                          # Try parsing with timezone
+                          try:
+                              return datetime.fromisoformat(ts_str)
+                          except:
+                              # If no timezone, assume UTC
+                              return datetime.fromisoformat(ts_str).replace(tzinfo=timezone.utc)
                       except Exception as e:
                           print(f"⚠️ Error parsing timestamp {ts_str}: {e}")
-                          return datetime.now()
+                          return datetime.now(timezone.utc)
 
                   def should_retrain(current_metrics, historical_metrics, threshold=0.05):
                       if not historical_metrics:
@@ -639,7 +647,12 @@ jobs:
                       
                       # Check if last training was more than 7 days ago
                       last_training = parse_timestamp(historical_metrics[0]["created_at"])
-                      if (datetime.now() - last_training) > timedelta(days=7):
+                      current_time = datetime.now(timezone.utc)
+                      
+                      print(f"Last training: {last_training}")
+                      print(f"Current time: {current_time}")
+                      
+                      if (current_time - last_training) > timedelta(days=7):
                           print("Weekly retraining triggered")
                           return True
                       
