@@ -46,3 +46,8 @@ jobs:
                   git add .streamlit/
                   git commit -m "chore: update streamlit config" || echo "No changes to commit"
                   git push
+
+            - name: Setup Python
+              uses: actions/setup-python@v2
+              with:
+                  python-version: "3.9"

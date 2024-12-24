@@ -50,19 +50,27 @@ model = initialize_model(num_classes).to(device)
 @st.cache_resource
 def load_model():
     try:
-        # Coba load model dari path relatif
-        model_path = os.path.join("model", "best_model_weights.pth")
-        if not os.path.exists(model_path):
-            # Coba path absolut
-            model_path = os.path.join(os.path.dirname(__file__), "..", "model", "best_model_weights.pth")
+        # Coba beberapa kemungkinan path model
+        possible_paths = [
+            os.path.join("model", "best_model_weights.pth"),
+            os.path.join(os.path.dirname(__file__), "..", "model", "best_model_weights.pth"),
+            os.path.join(os.getcwd(), "model", "best_model_weights.pth")
+        ]
         
-        if os.path.exists(model_path):
+        model_path = None
+        for path in possible_paths:
+            if os.path.exists(path):
+                model_path = path
+                break
+                
+        if model_path:
+            st.success(f"Model ditemukan di: {model_path}")
             model.load_state_dict(torch.load(model_path, map_location=device))
             model.eval()
             return model
         else:
-            st.error(f"Model weights tidak ditemukan di path: {model_path}")
-            st.info("Pastikan file model tersedia di direktori yang benar.")
+            st.error("Model weights tidak ditemukan di semua path yang dicoba")
+            st.info("Path yang dicoba: " + "\n".join(possible_paths))
             return None
     except Exception as e:
         st.error(f"Error loading model: {str(e)}")
