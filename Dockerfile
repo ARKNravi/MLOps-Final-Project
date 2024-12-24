@@ -18,6 +18,9 @@ COPY requirements.txt .
 # Install Python dependencies with specific flags
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Install additional dependencies
+RUN pip install --no-cache-dir supabase-py
+
 # Copy the rest of the application
 COPY . .
 
