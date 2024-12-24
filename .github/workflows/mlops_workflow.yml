@@ -380,7 +380,16 @@ jobs:
                   SUPABASE_S3_ACCESS_KEY_ID: ${{ secrets.SUPABASE_S3_ACCESS_KEY_ID }}
                   SUPABASE_S3_SECRET_ACCESS_KEY: ${{ secrets.SUPABASE_S3_SECRET_ACCESS_KEY }}
               run: |
+                  # Check if .dvc exists and remove it if necessary
+                  if [ -d ".dvc" ]; then
+                      echo "🗑️ Removing existing .dvc directory..."
+                      rm -rf .dvc
+                  fi
+
+                  echo "🚀 Initializing DVC..."
                   dvc init --no-scm
+
+                  echo "⚙️ Configuring DVC remote storage..."
                   dvc remote add -d storage s3://zyzahbhyrgrsakuwwdjr/mlops-data
                   dvc remote modify storage endpointurl https://zyzahbhyrgrsakuwwdjr.supabase.co/storage/v1/s3
                   dvc remote modify storage access_key_id ${SUPABASE_S3_ACCESS_KEY_ID}
