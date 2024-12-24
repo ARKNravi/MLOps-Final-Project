@@ -138,7 +138,7 @@ jobs:
                       
                       # Kompresi dengan Snappy
                       compressed_data = python_snappy.compress(data)
-                      
+
                       url = os.environ['PROMETHEUS_REMOTE_WRITE_URL']
                       username = os.environ['PROMETHEUS_USERNAME']
                       password = os.environ['PROMETHEUS_API_KEY']
@@ -148,7 +148,7 @@ jobs:
                           "Content-Type": "application/x-protobuf",
                           "X-Prometheus-Remote-Write-Version": "0.1.0"
                       }
-                      
+
                       try:
                           response = requests.post(
                               url,
@@ -172,7 +172,7 @@ jobs:
                       except Exception as e:
                           print(f"Error sending metric: {e}")
                           exit(1)
-                      
+
                   if __name__ == "__main__":
                       send_metric()
                   EOF
@@ -187,9 +187,13 @@ jobs:
                   LOKI_USERNAME: "1050298"
                   LOKI_URL: ${{ secrets.LOKI_URL }}
               run: |
+                  echo "🚀 Starting Loki log test..."
+
                   # Install Python dan dependencies
                   sudo apt-get update && sudo apt-get install -y python3-pip
                   pip3 install requests
+
+                  echo "📦 Dependencies installed successfully"
 
                   # Buat script Python untuk test Loki
                   cat > test_loki.py << EOF
@@ -200,69 +204,71 @@ jobs:
                   from datetime import datetime
 
                   def test_loki_connection():
-                      # Test basic connection
+                      print("🔍 Testing Loki connection...")
                       url = f"{os.environ['LOKI_URL']}/ready"
                       try:
                           response = requests.get(url)
-                          print(f"Loki readiness check: {response.status_code}")
+                          print(f"✨ Loki readiness check: {response.status_code}")
+                          if response.status_code == 200:
+                              print("✅ Loki is ready to receive logs")
+                          return response.status_code == 200
                       except Exception as e:
-                          print(f"Error checking Loki readiness: {e}")
+                          print(f"❌ Error checking Loki readiness: {e}")
                           return False
 
-                      return True
-
                   def send_test_logs():
+                      print("\n📝 Preparing test logs...")
                       timestamp = int(time.time() * 1e9)
                       current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                       
-                      # Different log levels for testing
                       test_logs = [
                           {
                               "level": "info",
-                              "message": "Test log message - INFO",
+                              "message": "MLOps Training Pipeline Started",
                               "value": 1.0,
                               "metric_value": 100.5
                           },
                           {
-                              "level": "warning",
-                              "message": "Test log message - WARNING",
+                              "level": "info",
+                              "message": "Model Training Configuration Loaded",
                               "value": 2.0,
                               "metric_value": 200.5
                           },
                           {
-                              "level": "error",
-                              "message": "Test log message - ERROR",
+                              "level": "info",
+                              "message": "Data Pipeline Initialized",
                               "value": 3.0,
                               "metric_value": 300.5
                           },
                           {
-                              "level": "debug",
-                              "message": "Test log message - DEBUG",
+                              "level": "info",
+                              "message": "Training Environment Ready",
                               "value": 4.0,
                               "metric_value": 400.5
                           }
                       ]
                       
+                      success_count = 0
                       for log in test_logs:
-                          # Format log message as JSON string
                           log_entry = {
                               "message": log["message"],
                               "timestamp": current_time,
                               "level": log["level"],
                               "value": log["value"],
                               "metric_value": log["metric_value"],
-                              "test_type": "loki_connection_test"
+                              "test_type": "mlops_pipeline_test"
                           }
                           
                           payload = {
                               "streams": [{
-                                  "stream": {
-                                      "job": "mlops_training",
-                                      "environment": "github_actions",
+                          "stream": {
+                            "job": "mlops_training",
+                            "environment": "github_actions",
                                       "level": log["level"],
-                                      "test": "true"
-                                  },
-                                  "values": [
+                                      "test": "true",
+                                      "component": "pipeline_test"
+                          },
+                          "values": [
                                       [str(timestamp), json.dumps(log_entry)]
                                   ]
                               }]
@@ -275,43 +281,51 @@ jobs:
                                   auth=(os.environ['LOKI_USERNAME'], os.environ['LOKI_API_KEY']),
                                   headers={"Content-Type": "application/json"}
                               )
-                              print(f"Sending {log['level']} log: {response.status_code}")
-                              if response.status_code != 204:
-                                  print(f"Error response: {response.text}")
+                              if response.status_code == 204:
+                                  print(f"✅ Successfully sent log: {log['message']}")
+                                  success_count += 1
                               else:
-                                  print(f"Successfully sent log: {json.dumps(log_entry, indent=2)}")
+                                  print(f"❌ Failed to send log: {response.text}")
                           except Exception as e:
-                              print(f"Error sending log: {e}")
+                              print(f"❌ Error sending log: {e}")
                               return False
                       
-                      return True
+                      print(f"\n📊 Log sending summary:")
+                      print(f"Total logs: {len(test_logs)}")
+                      print(f"Successfully sent: {success_count}")
+                      print(f"Failed: {len(test_logs) - success_count}")
+                      
+                      return success_count == len(test_logs)
 
                   if __name__ == "__main__":
-                      print("Testing Loki connection...")
                       if test_loki_connection():
-                          print("Loki connection test passed")
-                          print("Sending test logs...")
+                          print("\n🚀 Starting log sending test...")
                           if send_test_logs():
-                              print("✅ All test logs sent successfully")
-                              print("To verify logs in Grafana Loki, use these LogQL queries:")
-                              print("1. All test logs:")
-                              print('   {job="mlops_training", test="true"}')
-                              print("2. Filter by level:")
-                              print('   {job="mlops_training", test="true", level="error"}')
-                              print('   {job="mlops_training", test="true", level="warning"}')
-                              print('   {job="mlops_training", test="true", level="info"}')
-                              print("3. Search for test messages:")
-                              print('   {job="mlops_training", test="true"} |= "Test log message"')
+                              print("\n✅ All test logs sent successfully!")
+                              print("\n🔍 To verify logs in Grafana Loki, use these queries:")
+                              print("\n1. View all pipeline test logs:")
+                              print('   {job="mlops_training", test="true", component="pipeline_test"}')
+                              print("\n2. View specific log levels:")
+                              print('   {job="mlops_training", test="true"} | json | level="info"')
+                              print("\n3. Search for specific messages:")
+                              print('   {job="mlops_training", test="true"} |= "Pipeline"')
+                              print("\n4. View numeric values:")
+                              print('   {job="mlops_training", test="true"} | json | metric_value > 0')
                           else:
-                              print("❌ Failed to send test logs")
+                              print("\n❌ Some logs failed to send")
                               exit(1)
                       else:
-                          print("❌ Loki connection test failed")
+                          print("\n❌ Loki connection test failed")
                           exit(1)
                   EOF
 
+                  echo "📜 Test script created successfully"
+
                   # Jalankan test
+                  echo "\n🏃 Running Loki test..."
                   python3 test_loki.py
+
+                  echo "\n✨ Loki test completed"
 
     # Step 1: Build Base Image with Dependencies
     build_and_cache_dependencies:
