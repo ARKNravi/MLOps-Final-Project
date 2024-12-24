@@ -579,10 +579,10 @@ jobs:
                   username: ${{ secrets.DOCKER_USERNAME }}
                   password: ${{ secrets.DOCKER_PASSWORD }}
 
-            # Tambahkan langkah untuk menginstall matplotlib dan dependencies lainnya
+            # Install semua dependencies yang diperlukan
             - name: Install additional dependencies
               run: |
-                  pip install matplotlib seaborn scikit-learn pandas numpy
+                  pip install matplotlib seaborn scikit-learn pandas numpy mlflow torch torchvision
 
             - name: Build Dependencies Image
               run: |
@@ -593,7 +593,7 @@ jobs:
               run: |
                   sudo apt-get update && sudo apt-get install -y python3-pip
                   sudo apt-get install -y protobuf-compiler
-                  pip3 install prometheus-client requests python-snappy protobuf supabase==1.0.3
+                  pip3 install prometheus-client requests python-snappy protobuf supabase==1.0.3 mlflow
 
                   # Setup Prometheus proto file
                   cat > remote_write.proto << EOF

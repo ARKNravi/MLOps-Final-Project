@@ -19,7 +19,17 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Install additional dependencies
-RUN pip install --no-cache-dir supabase==1.0.3 matplotlib seaborn scikit-learn pandas numpy
+RUN pip install --no-cache-dir \
+    supabase==1.0.3 \
+    matplotlib \
+    seaborn \
+    scikit-learn \
+    pandas \
+    numpy \
+    mlflow \
+    torch \
+    torchvision \
+    --index-url https://download.pytorch.org/whl/cpu
 
 # Copy the rest of the application
 COPY . .
