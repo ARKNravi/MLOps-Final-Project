@@ -217,13 +217,43 @@ jobs:
                       
                       # Different log levels for testing
                       test_logs = [
-                          {"level": "info", "message": "Test log message - INFO"},
-                          {"level": "warning", "message": "Test log message - WARNING"},
-                          {"level": "error", "message": "Test log message - ERROR"},
-                          {"level": "debug", "message": "Test log message - DEBUG"}
+                          {
+                              "level": "info",
+                              "message": "Test log message - INFO",
+                              "value": 1.0,
+                              "metric_value": 100.5
+                          },
+                          {
+                              "level": "warning",
+                              "message": "Test log message - WARNING",
+                              "value": 2.0,
+                              "metric_value": 200.5
+                          },
+                          {
+                              "level": "error",
+                              "message": "Test log message - ERROR",
+                              "value": 3.0,
+                              "metric_value": 300.5
+                          },
+                          {
+                              "level": "debug",
+                              "message": "Test log message - DEBUG",
+                              "value": 4.0,
+                              "metric_value": 400.5
+                          }
                       ]
                       
                       for log in test_logs:
+                          # Format log message as JSON string
+                          log_entry = {
+                              "message": log["message"],
+                              "timestamp": current_time,
+                              "level": log["level"],
+                              "value": log["value"],
+                              "metric_value": log["metric_value"],
+                              "test_type": "loki_connection_test"
+                          }
+                          
                           payload = {
                               "streams": [{
                                   "stream": {
@@ -233,11 +263,7 @@ jobs:
                                       "test": "true"
                                   },
                                   "values": [
-                                      [str(timestamp), json.dumps({
-                                          "message": log["message"],
-                                          "timestamp": current_time,
-                                          "test_type": "loki_connection_test"
-                                      })]
+                                      [str(timestamp), json.dumps(log_entry)]
                                   ]
                               }]
                           }
@@ -252,6 +278,8 @@ jobs:
                               print(f"Sending {log['level']} log: {response.status_code}")
                               if response.status_code != 204:
                                   print(f"Error response: {response.text}")
+                              else:
+                                  print(f"Successfully sent log: {json.dumps(log_entry, indent=2)}")
                           except Exception as e:
                               print(f"Error sending log: {e}")
                               return False

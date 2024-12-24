@@ -176,9 +176,11 @@ def send_metric_to_prometheus(metric_name, value, job="mlops_training"):
         print(f"Error sending metric {metric_name}: {e}")
         return False
 
-def send_log_to_loki(log_message, log_level="info", labels=None):
+def send_log_to_loki(log_message, log_level="info", labels=None, numeric_values=None):
     if labels is None:
         labels = {}
+    if numeric_values is None:
+        numeric_values = {}
     
     # Add default labels
     labels.update({
@@ -189,15 +191,19 @@ def send_log_to_loki(log_message, log_level="info", labels=None):
     
     timestamp = int(time.time() * 1e9)  # Convert to nanoseconds
     
+    # Create log entry with numeric values
+    log_entry = {
+        "message": log_message,
+        "level": log_level,
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        **numeric_values  # Include any numeric values
+    }
+    
     payload = {
         "streams": [{
             "stream": labels,
             "values": [
-                [str(timestamp), json.dumps({
-                    "message": log_message,
-                    "level": log_level,
-                    **labels
-                })]
+                [str(timestamp), json.dumps(log_entry)]
             ]
         }]
     }
@@ -211,8 +217,11 @@ def send_log_to_loki(log_message, log_level="info", labels=None):
         )
         if response.status_code != 204:
             print(f"Failed to send log to Loki: {response.text}")
+            return False
+        return True
     except Exception as e:
         print(f"Error sending log to Loki: {e}")
+        return False
 
 # Training function
 def train_model(model, criterion, optimizer, scheduler, num_epochs):
@@ -238,13 +247,16 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs):
             "num_epochs": num_epochs
         }
         mlflow.log_params(params)
-        send_log_to_loki(f"Hyperparameters set: {json.dumps(params)}", "info", {"stage": "hyperparameters"})
+        send_log_to_loki("Hyperparameters set", "info", 
+            {"stage": "hyperparameters"}, 
+            numeric_values=params
+        )
 
         for epoch in range(num_epochs):
-            send_log_to_loki(f"Starting epoch {epoch}/{num_epochs-1}", "info", {
-                "stage": "epoch_start",
-                "epoch": str(epoch)
-            })
+            send_log_to_loki(f"Starting epoch {epoch}/{num_epochs-1}", "info", 
+                {"stage": "epoch_start", "epoch": str(epoch)},
+                {"current_epoch": epoch, "total_epochs": num_epochs}
+            )
             
             print(f'\nEpoch {epoch}/{num_epochs-1}')
             print('-' * 10)
@@ -313,12 +325,15 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs):
                                     "batch_accuracy": float(batch_acc),
                                     "batch_time": batch_time
                                 }
-                                send_log_to_loki(f"Batch metrics: {json.dumps(metrics_info)}", "info", {
-                                    "stage": "batch_metrics",
-                                    "phase": phase,
-                                    "epoch": str(epoch),
-                                    "batch": str(batch_idx)
-                                })
+                                send_log_to_loki("Batch metrics", "info", 
+                                    {
+                                        "stage": "batch_metrics",
+                                        "phase": phase,
+                                        "epoch": str(epoch),
+                                        "batch": str(batch_idx)
+                                    },
+                                    numeric_values=metrics_info
+                                )
                                 
                                 if phase == 'train':
                                     send_metric_to_prometheus("train_loss", batch_loss)
@@ -365,9 +380,9 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs):
                 try:
                     metrics_info = {
                         "epoch_loss": float(epoch_loss),
-                        "epoch_accuracy": float(epoch_acc)
+                        "epoch_accuracy": float(epoch_acc),
+                        "epoch_time": float(time.time() - epoch_start_time)
                     }
-                    
                     if phase == 'train':
                         current_lr = optimizer.param_groups[0]['lr']
                         metrics_info["learning_rate"] = current_lr
@@ -383,11 +398,14 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs):
                         mlflow.log_metric("val_loss", epoch_loss, step=epoch)
                         mlflow.log_metric("val_accuracy", float(epoch_acc), step=epoch)
                     
-                    send_log_to_loki(f"Epoch metrics: {json.dumps(metrics_info)}", "info", {
-                        "stage": "epoch_metrics",
-                        "phase": phase,
-                        "epoch": str(epoch)
-                    })
+                    send_log_to_loki("Epoch metrics", "info", 
+                        {
+                            "stage": "epoch_metrics",
+                            "phase": phase,
+                            "epoch": str(epoch)
+                        },
+                        numeric_values=metrics_info
+                    )
                 except Exception as e:
                     error_msg = f"Error logging epoch metrics: {str(e)}"
                     send_log_to_loki(error_msg, "error", {
