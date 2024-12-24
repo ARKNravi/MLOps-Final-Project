@@ -533,44 +533,26 @@ jobs:
                           "timestamp": datetime.now().isoformat()
                       }
 
-                  def should_retrain(current_metrics, threshold=0.05):
-                      # Get latest metrics
-                      latest = get_latest_metrics()
-                      
-                      # Check if accuracy has decreased significantly
-                      if latest["accuracy"] > 0:  # if we have previous metrics
-                          accuracy_diff = abs(current_metrics["accuracy"] - latest["accuracy"])
-                          if accuracy_diff > threshold:
-                              print(f"Model drift detected: Accuracy difference of {accuracy_diff:.4f}")
-                              return True
-                      
-                      # Check time since last training
-                      last_training = parse_timestamp(latest["timestamp"])
-                      current_time = datetime.now(timezone.utc)
-                      time_diff = current_time - last_training
-                      
-                      if time_diff > timedelta(days=7):
-                          print("Weekly retraining triggered")
-                          return True
-                      
-                      return False
+                  # Get current metrics or create default ones if file doesn't exist
+                  current_metrics = {
+                      "accuracy": 0,
+                      "loss": float('inf'),
+                      "timestamp": datetime.now().isoformat()
+                  }
 
-                  # Load current metrics
-                  with open("model_metrics.json", "r") as f:
-                      current_metrics = json.load(f)
+                  # Save current metrics
+                  with open("model_metrics.json", "w") as f:
+                      json.dump(current_metrics, f)
 
                   # Check if retraining needed
-                  retrain = should_retrain(current_metrics)
+                  latest_metrics = get_latest_metrics()
+                  retrain = True  # Selalu retrain jika ada push
 
                   # Save decision
                   with open("retrain.txt", "w") as f:
                       f.write("true" if retrain else "false")
 
                   print(f"\n🔄 Retraining decision: {'Yes' if retrain else 'No'}")
-                  if retrain:
-                      print(f"Model drift detected. Retraining needed.")
-                  else:
-                      print(f"No model drift detected. Retraining not needed.")
                   EOF
 
             - name: Trigger Retraining if Needed
