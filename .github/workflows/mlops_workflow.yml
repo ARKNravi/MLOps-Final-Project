@@ -9,6 +9,24 @@ on:
             - main
 
 jobs:
+    setup_database:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v2
+
+            - name: Setup PostgreSQL client
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y postgresql-client
+
+            - name: Run database migrations
+              env:
+                  SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+              run: |
+                  # Run migrations
+                  psql "$SUPABASE_DB_URL" -f migrations/create_model_metrics.sql
+
     monitoring_setup:
         runs-on: ubuntu-latest
         steps:

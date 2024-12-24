@@ -237,19 +237,18 @@ supabase: Client = create_client(
 def save_metrics_to_supabase(metrics, phase="train"):
     """Save metrics to Supabase for tracking"""
     try:
-        data = {
-            "phase": phase,
-            "timestamp": datetime.now().isoformat(),
-            "metrics": metrics,
-            "run_id": os.environ.get("GITHUB_RUN_ID", "local"),
-            "commit_sha": os.environ.get("GITHUB_SHA", "local")
+        # Convert tensor values to float
+        processed_metrics = {
+            "accuracy": float(metrics["accuracy"]) if isinstance(metrics["accuracy"], torch.Tensor) else metrics["accuracy"],
+            "loss": float(metrics["loss"]) if isinstance(metrics["loss"], torch.Tensor) else metrics["loss"],
+            "source": phase  # Menggunakan phase sebagai source
         }
         
-        result = supabase.table("model_metrics").insert(data).execute()
-        print(f"Saved {phase} metrics to Supabase")
+        result = supabase.table("model_metrics").insert(processed_metrics).execute()
+        print(f"✅ Saved {phase} metrics to Supabase")
         return True
     except Exception as e:
-        print(f"Error saving metrics to Supabase: {e}")
+        print(f"❌ Error saving metrics to Supabase: {e}")
         return False
 
 # Training function
@@ -308,8 +307,7 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
         save_metrics_to_supabase({
             "loss": avg_train_loss,
             "accuracy": train_accuracy,
-            "epoch": epoch + 1,
-            "phase": "train"
+            "source": "train"
         })
         
         print(f'train Loss: {avg_train_loss:.4f} Acc: {train_accuracy:.4f}')
@@ -349,8 +347,7 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
         save_metrics_to_supabase({
             "loss": avg_val_loss,
             "accuracy": val_accuracy,
-            "epoch": epoch + 1,
-            "phase": "validation"
+            "source": "validation"
         })
         
         print(f'val Loss: {avg_val_loss:.4f} Acc: {val_accuracy:.4f}')

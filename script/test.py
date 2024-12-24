@@ -266,11 +266,6 @@ def log_to_grafana(metric_name, value, labels=None):
         return False
 
 def test_model(model, test_loader, criterion, device):
-    # Set debug mode for quick testing
-    debug_mode = True  # Force debug mode to be True
-    print("🔧 Running in debug mode: 10 batches only")
-    max_batches = 10  # Force 10 batches
-    
     model.eval()
     test_loss = 0
     correct = 0
@@ -280,7 +275,7 @@ def test_model(model, test_loader, criterion, device):
     print("\nStarting test phase:")
     with torch.no_grad():
         for i, (images, labels) in enumerate(test_loader):
-            if debug_mode and i >= max_batches:
+            if i >= 10:  # Debug mode: hanya 10 batch
                 break
                 
             images, labels = images.to(device), labels.to(device)
@@ -293,27 +288,23 @@ def test_model(model, test_loader, criterion, device):
             correct += (predicted == labels).sum().item()
             batch_count += 1
             
-            if i % 5 == 0:  # Log every 5 batches
-                print(f"Test Batch {i+1}: Loss = {loss.item():.4f}")
-                
-            # Send metrics every 5 batches
             if i % 5 == 0:
-                send_metric_to_prometheus(
-                    "test_loss",
-                    loss.item(),
-                    {"batch": str(i + 1)}
-                )
+                print(f"Test Batch {i+1}: Loss = {loss.item():.4f}")
     
-    avg_test_loss = test_loss / batch_count
-    test_accuracy = 100 * correct / total
+    avg_test_loss = test_loss / batch_count if batch_count > 0 else 0
+    test_accuracy = (100 * correct / total) if total > 0 else 0
+    
+    # Save metrics to Supabase
+    metrics = {
+        "accuracy": float(test_accuracy),
+        "loss": float(avg_test_loss),
+        "source": "test"
+    }
+    save_metrics_to_supabase(metrics)
     
     print(f'\nTest Results:')
     print(f'Average Loss: {avg_test_loss:.4f}')
     print(f'Accuracy: {test_accuracy:.2f}%')
-    
-    # Send final metrics
-    send_metric_to_prometheus("final_test_loss", avg_test_loss)
-    send_metric_to_prometheus("final_test_accuracy", test_accuracy)
     
     return avg_test_loss, test_accuracy
 
