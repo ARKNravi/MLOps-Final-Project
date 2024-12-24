@@ -24,4 +24,5 @@ configobj==5.0.8
 python-snappy>=0.6.1
 protobuf>=4.21.0
 supabase==1.0.3
-semver>=3.0.0
+semver>=2.10,<3.0.0
+python-semantic-release==7.33.2
