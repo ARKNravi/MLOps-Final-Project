@@ -703,6 +703,35 @@ jobs:
                   sudo apt-get install -y protobuf-compiler
                   pip3 install prometheus-client requests python-snappy protobuf supabase-py
 
+                  # Setup Prometheus proto file
+                  cat > remote_write.proto << EOF
+                  syntax = "proto3";
+                  package prometheus;
+
+                  option go_package = "prompb";
+
+                  message WriteRequest {
+                    repeated TimeSeries timeseries = 1;
+                  }
+
+                  message TimeSeries {
+                    repeated Label labels = 1;
+                    repeated Sample samples = 2;
+                  }
+
+                  message Label {
+                    string name = 1;
+                    string value = 2;
+                  }
+
+                  message Sample {
+                    double value = 1;
+                    int64 timestamp = 2;
+                  }
+                  EOF
+
+                  protoc --python_out=script/ remote_write.proto
+
             - name: Train and Evaluate Model
               env:
                   DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
