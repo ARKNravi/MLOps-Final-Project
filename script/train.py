@@ -224,29 +224,32 @@ def send_log_to_loki(log_message, log_level="info", labels=None, numeric_values=
         return False
 
 # Training function
-def train_model(model, train_loader, val_loader, criterion, optimizer, num_epochs=1):  # Reduced epochs
-    print("train phase:")
+def train_model(model, train_loader, val_loader, criterion, optimizer, num_epochs, device):
+    # Set debug mode for quick training
+    debug_mode = True  # Set to True for quick training
     
-    # Training configuration for debugging
-    debug_config = {
-        "max_batches": 5,  # Only process 5 batches per epoch
-        "print_every": 1,  # Print every batch
-        "epochs": 1  # Only run for 1 epoch
-    }
+    if debug_mode:
+        print("🔧 Running in debug mode: 1 epoch, 10 batches only")
+        num_epochs = 1
+        max_batches = 10
+    else:
+        max_batches = float('inf')
+        
+    best_val_loss = float('inf')
+    train_losses = []
+    val_losses = []
     
-    for epoch in range(debug_config["epochs"]):
+    for epoch in range(num_epochs):
         model.train()
         running_loss = 0.0
-        correct = 0
-        total = 0
         batch_count = 0
         
+        print(f"\ntrain phase:")
         for i, (images, labels) in enumerate(train_loader):
-            if batch_count >= debug_config["max_batches"]:
+            if debug_mode and i >= max_batches:
                 break
                 
-            images = images.to(device)
-            labels = labels.to(device)
+            images, labels = images.to(device), labels.to(device)
             
             optimizer.zero_grad()
             outputs = model(images)
@@ -255,55 +258,67 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
             optimizer.step()
             
             running_loss += loss.item()
-            _, predicted = outputs.max(1)
-            total += labels.size(0)
-            correct += predicted.eq(labels).sum().item()
-            
-            if (i + 1) % debug_config["print_every"] == 0:
-                print(f'Epoch [{epoch + 1}/{debug_config["epochs"]}], '
-                      f'Step [{i + 1}/{debug_config["max_batches"]}], '
-                      f'Loss: {loss.item():.4f}, '
-                      f'Accuracy: {100 * correct / total:.2f}%')
-                
-                # Send metrics to Prometheus
-                send_metric_to_prometheus("train_loss", loss.item())
-                send_metric_to_prometheus("train_accuracy", 100 * correct / total)
-            
             batch_count += 1
+            
+            if i % 5 == 0:  # Log every 5 batches
+                print(f"Epoch {epoch+1}, Batch {i+1}: Loss = {loss.item():.4f}")
+                
+            # Send metrics every 10 batches
+            if i % 10 == 0:
+                send_metric_to_prometheus(
+                    "train_loss",
+                    loss.item(),
+                    {"epoch": str(epoch + 1), "batch": str(i + 1)}
+                )
+        
+        avg_train_loss = running_loss / batch_count
+        train_losses.append(avg_train_loss)
         
         # Validation phase
         model.eval()
-        val_loss = 0
+        val_loss = 0.0
         val_correct = 0
         val_total = 0
         batch_count = 0
         
+        print(f"\nvalidation phase:")
         with torch.no_grad():
             for i, (images, labels) in enumerate(val_loader):
-                if batch_count >= debug_config["max_batches"]:
+                if debug_mode and i >= max_batches:
                     break
                     
-                images = images.to(device)
-                labels = labels.to(device)
+                images, labels = images.to(device), labels.to(device)
                 outputs = model(images)
                 loss = criterion(outputs, labels)
                 
                 val_loss += loss.item()
-                _, predicted = outputs.max(1)
+                _, predicted = torch.max(outputs.data, 1)
                 val_total += labels.size(0)
-                val_correct += predicted.eq(labels).sum().item()
+                val_correct += (predicted == labels).sum().item()
                 batch_count += 1
+                
+                if i % 5 == 0:  # Log every 5 batches
+                    print(f"Validation Batch {i+1}: Loss = {loss.item():.4f}")
         
-        val_accuracy = 100 * val_correct / val_total if val_total > 0 else 0
-        val_loss = val_loss / batch_count if batch_count > 0 else 0
+        avg_val_loss = val_loss / batch_count
+        val_accuracy = 100 * val_correct / val_total
+        val_losses.append(avg_val_loss)
         
-        print(f'Validation - Loss: {val_loss:.4f}, Accuracy: {val_accuracy:.2f}%')
+        print(f'Epoch [{epoch+1}/{num_epochs}]:')
+        print(f'Train Loss: {avg_train_loss:.4f}')
+        print(f'Val Loss: {avg_val_loss:.4f}')
+        print(f'Val Accuracy: {val_accuracy:.2f}%')
         
-        # Send validation metrics to Prometheus
-        send_metric_to_prometheus("val_loss", val_loss)
-        send_metric_to_prometheus("val_accuracy", val_accuracy)
+        # Send epoch metrics
+        send_metric_to_prometheus("epoch_train_loss", avg_train_loss, {"epoch": str(epoch + 1)})
+        send_metric_to_prometheus("epoch_val_loss", avg_val_loss, {"epoch": str(epoch + 1)})
+        send_metric_to_prometheus("epoch_val_accuracy", val_accuracy, {"epoch": str(epoch + 1)})
+        
+        if avg_val_loss < best_val_loss:
+            best_val_loss = avg_val_loss
+            torch.save(model.state_dict(), 'best_model.pth')
     
-    return model
+    return train_losses, val_losses
 
 # Main script
 if __name__ == "__main__":

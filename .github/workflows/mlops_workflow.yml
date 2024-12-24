@@ -730,6 +730,7 @@ jobs:
                   import mlflow
                   import json
                   import pandas as pd
+                  import numpy as np
                   from datetime import datetime, timedelta
 
                   # Set MLflow tracking URI
@@ -755,40 +756,37 @@ jobs:
                       }
                       comparison_data.append(metrics)
 
-                  # Handle empty runs
-                  if not comparison_data:
-                      default_metrics = {
-                          "run_id": "no_runs",
-                          "accuracy": 0,
-                          "loss": 0,
-                          "training_time": 0,
-                          "timestamp": datetime.now().timestamp() * 1000
-                      }
-                      comparison_data.append(default_metrics)
-
                   # Create comparison report
-                  df = pd.DataFrame(comparison_data)
-
-                  # Safe access to DataFrame columns
-                  best_accuracy = df["accuracy"].max() if not df.empty else 0
-                  mean_accuracy = df["accuracy"].mean() if not df.empty else 0
-                  accuracy_trend = float(df["accuracy"].diff().mean()) if len(df) > 1 else 0
-                  loss_trend = float(df["loss"].diff().mean()) if len(df) > 1 else 0
-
-                  best_run_id = df.loc[df["accuracy"].idxmax(), "run_id"] if not df.empty else "no_runs"
-
-                  report = {
-                      "best_model": {
-                          "run_id": best_run_id,
-                          "accuracy": float(best_accuracy),
-                          "improvement": float(best_accuracy - mean_accuracy)
-                      },
-                      "trend": {
-                          "accuracy_trend": accuracy_trend,
-                          "loss_trend": loss_trend
-                      },
-                      "comparison": comparison_data
-                  }
+                  if comparison_data:
+                      df = pd.DataFrame(comparison_data)
+                      best_accuracy_idx = df["accuracy"].idxmax() if not df.empty else 0
+                      mean_accuracy = df["accuracy"].mean() if not df.empty else 0
+                      
+                      report = {
+                          "best_model": {
+                              "run_id": df.loc[best_accuracy_idx, "run_id"] if not df.empty else "no_runs",
+                              "accuracy": float(df["accuracy"].max()) if not df.empty else 0,
+                              "improvement": float(df["accuracy"].max() - mean_accuracy) if not df.empty else 0
+                          },
+                          "trend": {
+                              "accuracy_trend": float(df["accuracy"].diff().mean()) if len(df) > 1 else 0,
+                              "loss_trend": float(df["loss"].diff().mean()) if len(df) > 1 else 0
+                          },
+                          "comparison": df.to_dict(orient="records") if not df.empty else []
+                      }
+                  else:
+                      report = {
+                          "best_model": {
+                              "run_id": "no_runs",
+                              "accuracy": 0,
+                              "improvement": 0
+                          },
+                          "trend": {
+                              "accuracy_trend": 0,
+                              "loss_trend": 0
+                          },
+                          "comparison": []
+                      }
 
                   # Save comparison report
                   with open("model_comparison.json", "w") as f:
@@ -822,13 +820,22 @@ jobs:
                   with open("model_comparison.json", "r") as f:
                       comparison_data = json.load(f)
 
-                  # Get latest two models for A/B testing
-                  model_a = comparison_data["comparison"][1]  # Previous model
-                  model_b = comparison_data["comparison"][0]  # New model
+                  # Initialize default results
+                  ab_results = {
+                      "t_statistic": 0,
+                      "p_value": 1,
+                      "significant_difference": False,
+                      "better_model": "None",
+                      "improvement_percentage": 0
+                  }
 
-                  # Perform statistical test
-                  def ab_test_analysis(model_a, model_b):
-                      # Simulate predictions based on accuracy
+                  # Only perform A/B testing if we have enough models
+                  if len(comparison_data["comparison"]) >= 2:
+                      # Get latest two models for A/B testing
+                      model_a = comparison_data["comparison"][1]  # Previous model
+                      model_b = comparison_data["comparison"][0]  # New model
+
+                      # Perform statistical test
                       n_samples = 1000
                       a_predictions = np.random.binomial(1, model_a["accuracy"], n_samples)
                       b_predictions = np.random.binomial(1, model_b["accuracy"], n_samples)
@@ -836,16 +843,13 @@ jobs:
                       # Perform t-test
                       t_stat, p_value = stats.ttest_ind(a_predictions, b_predictions)
                       
-                      return {
+                      ab_results = {
                           "t_statistic": float(t_stat),
                           "p_value": float(p_value),
                           "significant_difference": p_value < 0.05,
                           "better_model": "B" if model_b["accuracy"] > model_a["accuracy"] else "A",
-                          "improvement_percentage": ((model_b["accuracy"] - model_a["accuracy"]) / model_a["accuracy"]) * 100
+                          "improvement_percentage": ((model_b["accuracy"] - model_a["accuracy"]) / model_a["accuracy"]) * 100 if model_a["accuracy"] > 0 else 0
                       }
-
-                  # Run A/B testing analysis
-                  ab_results = ab_test_analysis(model_a, model_b)
 
                   # Save results
                   with open("ab_test_results.json", "w") as f:
