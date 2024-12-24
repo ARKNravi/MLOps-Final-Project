@@ -58,13 +58,19 @@ jobs:
             - name: Install Vercel CLI
               run: npm install --global vercel@latest
 
-            - name: Create deployment directory
+            - name: Prepare deployment
               run: |
-                  mkdir -p .vercel
+                  # Buat direktori deployment
                   mkdir -p deployment
+
+                  # Copy file yang diperlukan
                   cp -r script deployment/
                   cp requirements-deploy.txt deployment/
                   cp vercel.json deployment/
+
+                  # Copy vercel output directory
+                  mkdir -p deployment/.vercel
+                  cp -r vercel/output deployment/.vercel/
 
             - name: Deploy to Vercel
               env:
@@ -74,7 +80,6 @@ jobs:
               working-directory: ./deployment
               run: |
                   vercel pull --yes --environment=production --token=$VERCEL_TOKEN
-                  vercel build --prod --token=$VERCEL_TOKEN || (echo "Build failed" && exit 1)
                   vercel deploy --prebuilt --prod --token=$VERCEL_TOKEN
 
             - name: Cleanup

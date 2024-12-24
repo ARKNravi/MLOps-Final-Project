@@ -1,0 +1,9 @@
+{
+    "version": 2,
+    "builds": [
+        {
+            "src": "script/app.py",
+            "use": "@vercel/python"
+        }
+    ]
+}

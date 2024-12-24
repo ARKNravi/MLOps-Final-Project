@@ -1,14 +1,13 @@
 {
     "version": 2,
+    "buildCommand": "pip install -r requirements-deploy.txt",
     "builds": [
         {
             "src": "script/app.py",
             "use": "@vercel/python",
             "config": {
                 "maxLambdaSize": "15mb",
-                "runtime": "python3.9",
-                "installCommand": "pip install -r requirements-deploy.txt --no-cache-dir",
-                "buildCommand": "pip list"
+                "runtime": "python3.9"
             }
         }
     ],
