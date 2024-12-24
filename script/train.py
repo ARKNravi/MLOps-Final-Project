@@ -235,16 +235,15 @@ supabase: Client = create_client(
 )
 
 def save_metrics_to_supabase(metrics, phase="train"):
-    """Save metrics to Supabase for tracking"""
+    """Save metrics to Supabase with simplified structure"""
     try:
-        # Convert tensor values to float
-        processed_metrics = {
-            "accuracy": float(metrics["accuracy"]) if isinstance(metrics["accuracy"], torch.Tensor) else metrics["accuracy"],
-            "loss": float(metrics["loss"]) if isinstance(metrics["loss"], torch.Tensor) else metrics["loss"],
-            "source": phase  # Menggunakan phase sebagai source
+        data = {
+            "accuracy": float(metrics["accuracy"]),  # Pastikan nilai adalah float
+            "loss": float(metrics["loss"]),         # Pastikan nilai adalah float
+            "source": phase                         # train, validation, atau test
         }
         
-        result = supabase.table("model_metrics").insert(processed_metrics).execute()
+        result = supabase.table("model_metrics").insert(data).execute()
         print(f"✅ Saved {phase} metrics to Supabase")
         return True
     except Exception as e:
@@ -307,7 +306,8 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
         save_metrics_to_supabase({
             "loss": avg_train_loss,
             "accuracy": train_accuracy,
-            "source": "train"
+            "epoch": epoch + 1,
+            "phase": "train"
         })
         
         print(f'train Loss: {avg_train_loss:.4f} Acc: {train_accuracy:.4f}')
@@ -347,7 +347,8 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
         save_metrics_to_supabase({
             "loss": avg_val_loss,
             "accuracy": val_accuracy,
-            "source": "validation"
+            "epoch": epoch + 1,
+            "phase": "validation"
         })
         
         print(f'val Loss: {avg_val_loss:.4f} Acc: {val_accuracy:.4f}')
