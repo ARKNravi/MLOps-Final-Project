@@ -627,51 +627,60 @@ jobs:
 
                   protoc --python_out=script/ remote_write.proto
 
-            - name: Train and Evaluate Model
+            - name: Install system dependencies
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y protobuf-compiler python3-snappy
+
+            - name: Generate Protobuf
+              run: |
+                  # Create proto file
+                  cat > remote_write.proto << EOF
+                  syntax = "proto3";
+                  package prometheus;
+
+                  option go_package = "prompb";
+
+                  message WriteRequest {
+                    repeated TimeSeries timeseries = 1;
+                  }
+
+                  message TimeSeries {
+                    repeated Label labels = 1;
+                    repeated Sample samples = 2;
+                  }
+
+                  message Label {
+                    string name = 1;
+                    string value = 2;
+                  }
+
+                  message Sample {
+                    double value = 1;
+                    int64 timestamp = 2;
+                  }
+                  EOF
+
+                  # Generate Python file
+                  protoc --python_out=. remote_write.proto
+
+                  # Move generated file to script directory
+                  mv remote_write_pb2.py script/
+
+            - name: Train model
               env:
-                  DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-                  DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
-                  SUPABASE_S3_ACCESS_KEY_ID: ${{ secrets.SUPABASE_S3_ACCESS_KEY_ID }}
-                  SUPABASE_S3_SECRET_ACCESS_KEY: ${{ secrets.SUPABASE_S3_SECRET_ACCESS_KEY }}
-                  DAGSHUB_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
-                  DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
-                  PROMETHEUS_API_KEY: ${{ secrets.PROMETHEUS_API_KEY }}
-                  LOKI_API_KEY: ${{ secrets.LOKI_API_KEY }}
                   PROMETHEUS_USERNAME: "1902030"
-                  LOKI_USERNAME: "1050298"
+                  PROMETHEUS_API_KEY: ${{ secrets.PROMETHEUS_API_KEY }}
                   PROMETHEUS_REMOTE_WRITE_URL: ${{ secrets.PROMETHEUS_REMOTE_WRITE_URL }}
                   LOKI_URL: ${{ secrets.LOKI_URL }}
-                  MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+                  LOKI_USERNAME: ${{ secrets.LOKI_USERNAME }}
+                  LOKI_API_KEY: ${{ secrets.LOKI_API_KEY }}
+                  DAGSHUB_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
+                  DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
                   SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
                   SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
               run: |
-                  docker run \
-                      -e DOCKER_USERNAME="$DOCKER_USERNAME" \
-                      -e DOCKER_PASSWORD="$DOCKER_PASSWORD" \
-                      -e SUPABASE_S3_ACCESS_KEY_ID="$SUPABASE_S3_ACCESS_KEY_ID" \
-                      -e SUPABASE_S3_SECRET_ACCESS_KEY="$SUPABASE_S3_SECRET_ACCESS_KEY" \
-                      -e DAGSHUB_USERNAME="$DAGSHUB_USERNAME" \
-                      -e DAGSHUB_TOKEN="$DAGSHUB_TOKEN" \
-                      -e PROMETHEUS_API_KEY="$PROMETHEUS_API_KEY" \
-                      -e LOKI_API_KEY="$LOKI_API_KEY" \
-                      -e PROMETHEUS_USERNAME="$PROMETHEUS_USERNAME" \
-                      -e LOKI_USERNAME="$LOKI_USERNAME" \
-                      -e PROMETHEUS_REMOTE_WRITE_URL="$PROMETHEUS_REMOTE_WRITE_URL" \
-                      -e LOKI_URL="$LOKI_URL" \
-                      -e MLFLOW_TRACKING_URI="$MLFLOW_TRACKING_URI" \
-                      -e SUPABASE_URL="$SUPABASE_URL" \
-                      -e SUPABASE_KEY="$SUPABASE_KEY" \
-                      -v ${{ github.workspace }}:/app \
-                      -w /app \
-                      --network host \
-                      ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest \
-                      bash -c "
-                        echo 'Installing additional dependencies...' &&
-                        pip install supabase==1.0.3 &&
-                        echo 'Starting training...' &&
-                        python script/train.py &&
-                        python script/test.py
-                      "
+                  python script/train.py
 
     # Step 3: Build and Push Final Docker Image with Model
     build_and_push_docker:
