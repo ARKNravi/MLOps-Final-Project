@@ -18,89 +18,26 @@ jobs:
             - name: Setup Python
               uses: actions/setup-python@v4
               with:
-                  python-version: "3.9.18"
+                  python-version: "3.9"
                   cache: "pip"
-
-            - name: Setup Python environment for Vercel
-              run: |
-                  # Add deadsnakes PPA
-                  sudo add-apt-repository ppa:deadsnakes/ppa -y
-                  sudo apt-get update
-
-                  # Install Python 3.9
-                  sudo apt-get install -y python3.9 python3.9-dev python3.9-venv python3.9-distutils
-
-                  # Create symlinks
-                  sudo update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.9 1
-                  sudo update-alternatives --set python3 /usr/bin/python3.9
-
-                  # Install pip for Python 3.9
-                  curl -sS https://bootstrap.pypa.io/get-pip.py | python3.9
-
-                  # Verify installation
-                  python3.9 --version
-                  which python3.9
-                  python3.9 -m pip --version
-
-            - name: Create and activate virtual environment
-              run: |
-                  python3.9 -m venv venv
-                  source venv/bin/activate
-                  python -m pip install --upgrade pip setuptools wheel
 
             - name: Install dependencies
               run: |
-                  source venv/bin/activate
-                  pip install -r requirements-deploy.txt --no-cache-dir
-
-                  # Verify installations
-                  echo "Checking PyTorch installation..."
-                  python -c "import torch; print(f'PyTorch version: {torch.__version__}')"
-                  echo "Checking NumPy installation..."
-                  python -c "import numpy; print(f'NumPy version: {numpy.__version__}')"
-                  echo "All installed packages:"
-                  pip freeze
+                  python -m pip install --upgrade pip
+                  pip install -r requirements-deploy.txt
 
             - name: Install Vercel CLI
               run: npm install --global vercel@latest
 
-            - name: Prepare for deployment
-              run: |
-                  # Create deployment directory
-                  mkdir -p deployment
+            - name: Pull Vercel Environment Information
+              run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
 
-                  # Create necessary structure
-                  mkdir -p deployment/script
-                  mkdir -p deployment/.vercel/output
+            - name: Build Project Artifacts
+              run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
 
-                  # Copy only necessary files
-                  cp script/app.py deployment/script/
-                  cp script/utils.py deployment/script/ 2>/dev/null || :
-                  cp requirements-deploy.txt deployment/
-                  cp vercel.json deployment/
-
-                  # Copy vercel output files
-                  cp vercel/output/builds.json deployment/.vercel/output/
-                  cp vercel/output/config.json deployment/.vercel/output/
-
-                  # Verify files
-                  echo "Deployment files:"
-                  ls -la deployment/script/
-                  ls -la deployment/.vercel/output/
-
-            - name: Deploy to Vercel
+            - name: Deploy Project Artifacts to Vercel
+              run: vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}
               env:
                   VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-                  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
                   VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-              working-directory: ./deployment
-              run: |
-                  echo "Starting Vercel deployment..."
-                  vercel pull --yes --environment=production --token=$VERCEL_TOKEN
-                  vercel deploy --prod --token=$VERCEL_TOKEN
-
-            - name: Cleanup
-              if: always()
-              run: |
-                  rm -rf venv
-                  rm -rf deployment
+                  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}

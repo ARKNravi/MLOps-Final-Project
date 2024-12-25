@@ -128,57 +128,60 @@ def log_confusion_matrix(model, dataloader, class_names):
     # Log the confusion matrix image as an artifact in MLflow
     mlflow.log_artifact(confusion_matrix_path)
 
-def send_metric_to_prometheus(metric_name, value, job="mlops_training"):
-    timestamp_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+def send_metric_to_prometheus(metric_name, value, labels=None):
+    if labels is None:
+        labels = {}
+        
+    timestamp_ms = int(time.time() * 1000)
     
-    # Ensure value is a float
-    try:
-        value = float(value)
-    except (TypeError, ValueError) as e:
-        print(f"Error converting metric value to float: {e}")
-        return False
-    
+    # Inisialisasi WriteRequest
     write_req = WriteRequest()
     ts = write_req.timeseries.add()
     
-    labels = [
-        ("__name__", metric_xname),
-        ("job", job),
+    # Tambahkan labels wajib
+    base_labels = [
+        ("__name__", metric_name),
+        ("job", "mlops_training"),
         ("environment", "github_actions")
     ]
     
-    for name, label_value in labels:
+    # Tambahkan custom labels
+    all_labels = base_labels + list(labels.items())
+    
+    for name, value in all_labels:
         label = ts.labels.add()
         label.name = name
-        label.value = str(label_value)
+        label.value = str(value)
     
+    # Tambahkan sample
     sample = ts.samples.add()
-    sample.value = value
+    sample.value = float(value)
     sample.timestamp = timestamp_ms
     
+    # Serialize dan kompres data
     data = write_req.SerializeToString()
     compressed_data = python_snappy.compress(data)
     
-    url = os.environ['PROMETHEUS_REMOTE_WRITE_URL']
-    username = os.environ['PROMETHEUS_USERNAME']
-    password = os.environ['PROMETHEUS_API_KEY']
-    
-    headers = {
-        "Content-Encoding": "snappy",
-        "Content-Type": "application/x-protobuf",
-        "X-Prometheus-Remote-Write-Version": "0.1.0"
-    }
-    
+    # Kirim ke Prometheus
     try:
         response = requests.post(
-            url,
+            os.environ['PROMETHEUS_REMOTE_WRITE_URL'],
             data=compressed_data,
-            auth=(username, password),
-            headers=headers
+            auth=(os.environ['PROMETHEUS_USERNAME'], os.environ['PROMETHEUS_API_KEY']),
+            headers={
+                "Content-Encoding": "snappy",
+                "Content-Type": "application/x-protobuf",
+                "X-Prometheus-Remote-Write-Version": "0.1.0"
+            }
         )
-        return response.status_code in [200, 204]
+        if response.status_code in [200, 204]:
+            print(f"✅ Metric {metric_name} sent successfully")
+            return True
+        else:
+            print(f"❌ Failed to send metric {metric_name}: {response.text}")
+            return False
     except Exception as e:
-        print(f"Error sending metric {metric_name}: {e}")
+        print(f"❌ Error sending metric {metric_name}: {e}")
         return False
 
 def send_log_to_loki(log_message, log_level="info", labels=None, numeric_values=None):
@@ -320,49 +323,6 @@ def send_batch_metrics_to_loki(batch_metrics, phase="train", level="info"):
         print(f"Error sending batch metrics: {e}")
         return False
 
-def send_metrics_to_prometheus(metric_name, value, labels=None):
-    """Send metrics to Prometheus"""
-    if labels is None:
-        labels = {}
-    
-    timestamp_ms = int(time.time() * 1000)
-    
-    # Add default labels
-    labels.update({
-        "job": "mlops_training",
-        "environment": "github_actions"
-    })
-    
-    # Format metric data
-    metric_data = {
-        "series": [{
-            "labels": [
-                {"name": "__name__", "value": metric_name}
-            ] + [
-                {"name": k, "value": str(v)}
-                for k, v in labels.items()
-            ],
-            "samples": [
-                [timestamp_ms, str(float(value))]
-            ]
-        }]
-    }
-    
-    try:
-        response = requests.post(
-            os.environ.get('PROMETHEUS_REMOTE_WRITE_URL'),
-            json=metric_data,
-            auth=(os.environ.get('PROMETHEUS_USERNAME'), os.environ.get('PROMETHEUS_API_KEY')),
-            headers={
-                'Content-Type': 'application/json',
-                'X-Scope-OrgID': os.environ.get('PROMETHEUS_USERNAME')
-            }
-        )
-        return response.status_code in [200, 204]
-    except Exception as e:
-        print(f"Error sending metrics to Prometheus: {e}")
-        return False
-
 # Training function
 def train_model(model, train_loader, val_loader, criterion, optimizer, num_epochs, device):
     best_val_loss = float('inf')
@@ -413,10 +373,24 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
             # Send to Loki
             send_batch_metrics_to_loki(batch_metrics, "train")
             
-            # Send to Prometheus
-            send_metrics_to_prometheus("batch_loss", batch_loss, {"phase": "train", "epoch": str(epoch+1), "batch": str(i+1)})
-            send_metrics_to_prometheus("batch_accuracy", batch_accuracy, {"phase": "train", "epoch": str(epoch+1), "batch": str(i+1)})
-            send_metrics_to_prometheus("batch_time", batch_time, {"phase": "train", "epoch": str(epoch+1), "batch": str(i+1)})
+            # Kirim metrik setiap 5 batch
+            if (i + 1) % 5 == 0:
+                labels = {
+                    "epoch": str(epoch + 1),
+                    "batch": str(i + 1)
+                }
+                
+                # Kirim metrik training
+                send_metric_to_prometheus(
+                    "train_loss",
+                    batch_loss,
+                    labels
+                )
+                send_metric_to_prometheus(
+                    "train_accuracy",
+                    batch_accuracy,
+                    labels
+                )
             
             running_loss += batch_loss
             batch_count += 1
@@ -456,25 +430,24 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
                 batch_loss = loss.item()
                 batch_accuracy = 100 * (predicted == labels).sum().item() / labels.size(0)
                 
-                # Send batch metrics to Prometheus and Loki
-                send_metrics_to_prometheus(
-                    'val_loss_batch',
-                    batch_loss,
-                    {
-                        'epoch': str(epoch + 1),
-                        'batch': str(i + 1),
-                        'phase': 'validation'
+                # Kirim metrik setiap 5 batch
+                if (i + 1) % 5 == 0:
+                    labels = {
+                        "epoch": str(epoch + 1),
+                        "batch": str(i + 1)
                     }
-                )
-                send_metrics_to_prometheus(
-                    'val_accuracy_batch',
-                    batch_accuracy,
-                    {
-                        'epoch': str(epoch + 1),
-                        'batch': str(i + 1),
-                        'phase': 'validation'
-                    }
-                )
+                    
+                    # Kirim metrik validation
+                    send_metric_to_prometheus(
+                        "val_loss",
+                        batch_loss,
+                        labels
+                    )
+                    send_metric_to_prometheus(
+                        "val_accuracy", 
+                        val_accuracy,
+                        labels
+                    )
                 
                 if i % 10 == 0:
                     print(f"Batch {i}/{val_batches} - Loss: {batch_loss:.4f} - Acc: {batch_accuracy:.2f}%")
