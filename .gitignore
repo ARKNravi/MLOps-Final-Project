@@ -568,3 +568,5 @@ temp/
 # artifact png file
 *.png
 .vercel
+
+.vercel

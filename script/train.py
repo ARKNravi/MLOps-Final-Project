@@ -20,26 +20,48 @@ import time
 import json
 from supabase import create_client, Client
 
-# MLflow configuration
-MLFLOW_TRACKING_URI = "https://dagshub.com/salsazufar/project-akhir-mlops.mlflow"
-mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
-
-# Set MLflow credentials through environment variables
-os.environ['MLFLOW_TRACKING_USERNAME'] = os.environ.get('DAGSHUB_USERNAME', '')
-os.environ['MLFLOW_TRACKING_PASSWORD'] = os.environ.get('DAGSHUB_TOKEN', '')
-
-# Print for debugging
-print(f"MLflow Tracking URI: {MLFLOW_TRACKING_URI}")
-print(f"DagsHub Username: {os.environ.get('DAGSHUB_USERNAME')}")
-print("Attempting to connect to MLflow...")
+# MLflow configuration with better error handling
+MLFLOW_TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI")
+if not MLFLOW_TRACKING_URI:
+    print("⚠️ MLFLOW_TRACKING_URI tidak ditemukan, menggunakan nilai default")
+    MLFLOW_TRACKING_URI = "https://dagshub.com/salsazufar/project-akhir-mlops.mlflow"
 
 try:
-    # Test MLflow connection
+    mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+    print(f"MLflow Tracking URI: {MLFLOW_TRACKING_URI}")
+    
+    # Set MLflow credentials
+    dagshub_username = os.environ.get('DAGSHUB_USERNAME')
+    dagshub_token = os.environ.get('DAGSHUB_TOKEN')
+    
+    if not dagshub_username or not dagshub_token:
+        print("⚠️ DagsHub credentials tidak lengkap")
+    else:
+        os.environ['MLFLOW_TRACKING_USERNAME'] = dagshub_username
+        os.environ['MLFLOW_TRACKING_PASSWORD'] = dagshub_token
+        print(f"DagsHub Username: {dagshub_username}")
+    
+    print("🔄 Mencoba menghubungkan ke MLflow...")
     mlflow.set_experiment("default")
-    print("Successfully connected to MLflow")
+    print("✅ Berhasil terhubung ke MLflow")
 except Exception as e:
-    print(f"Error connecting to MLflow: {e}")
-    raise
+    print(f"❌ Error menghubungkan ke MLflow: {str(e)}")
+    print("⚠️ Melanjutkan tanpa MLflow tracking...")
+
+# Validasi environment variables yang diperlukan
+required_env_vars = [
+    'PROMETHEUS_REMOTE_WRITE_URL',
+    'PROMETHEUS_USERNAME',
+    'PROMETHEUS_API_KEY',
+    'LOKI_URL',
+    'LOKI_USERNAME',
+    'LOKI_API_KEY'
+]
+
+missing_vars = [var for var in required_env_vars if not os.environ.get(var)]
+if missing_vars:
+    print(f"⚠️ Environment variables berikut tidak ditemukan: {', '.join(missing_vars)}")
+    print("⚠️ Beberapa fitur monitoring mungkin tidak akan berfungsi")
 
 # Hyperparameters
 num_epochs = 1
@@ -128,60 +150,61 @@ def log_confusion_matrix(model, dataloader, class_names):
     # Log the confusion matrix image as an artifact in MLflow
     mlflow.log_artifact(confusion_matrix_path)
 
-def send_metric_to_prometheus(metric_name, value, labels=None):
-    if labels is None:
-        labels = {}
-        
-    timestamp_ms = int(time.time() * 1000)
-    
-    # Inisialisasi WriteRequest
-    write_req = WriteRequest()
-    ts = write_req.timeseries.add()
-    
-    # Tambahkan labels wajib
-    base_labels = [
-        ("__name__", metric_name),
-        ("job", "mlops_training"),
-        ("environment", "github_actions")
-    ]
-    
-    # Tambahkan custom labels
-    all_labels = base_labels + list(labels.items())
-    
-    for name, value in all_labels:
-        label = ts.labels.add()
-        label.name = name
-        label.value = str(value)
-    
-    # Tambahkan sample
-    sample = ts.samples.add()
-    sample.value = float(value)
-    sample.timestamp = timestamp_ms
-    
-    # Serialize dan kompres data
-    data = write_req.SerializeToString()
-    compressed_data = python_snappy.compress(data)
-    
-    # Kirim ke Prometheus
+# Fungsi untuk mengirim metrik ke Prometheus dengan format protobuf
+def send_metric_to_prometheus(metric_name, value):
+    """
+    Fungsi untuk mengirim metrik ke Prometheus menggunakan protobuf
+    Args:
+        metric_name (str): Nama metrik (train_loss, train_accuracy, val_loss, val_accuracy)
+        value (float): Nilai metrik
+    """
     try:
+        timestamp_ms = int(time.time() * 1000)
+        
+        # Buat WriteRequest protobuf
+        write_req = WriteRequest()
+        ts = write_req.timeseries.add()
+        
+        # Tambahkan labels
+        labels = [
+            ("__name__", metric_name),
+            ("job", "mlops_training"),
+            ("environment", "github_actions")
+        ]
+        
+        for name, value_label in labels:
+            label = ts.labels.add()
+            label.name = name
+            label.value = str(value_label)
+        
+        # Tambahkan sample
+        sample = ts.samples.add()
+        sample.value = float(value)
+        sample.timestamp = timestamp_ms
+        
+        # Serialize dan kompres data
+        data = write_req.SerializeToString()
+        compressed_data = python_snappy.compress(data)
+        
+        # Kirim ke Prometheus
         response = requests.post(
-            os.environ['PROMETHEUS_REMOTE_WRITE_URL'],
+            os.environ.get('PROMETHEUS_REMOTE_WRITE_URL'),
             data=compressed_data,
-            auth=(os.environ['PROMETHEUS_USERNAME'], os.environ['PROMETHEUS_API_KEY']),
+            auth=(os.environ.get('PROMETHEUS_USERNAME'), os.environ.get('PROMETHEUS_API_KEY')),
             headers={
                 "Content-Encoding": "snappy",
                 "Content-Type": "application/x-protobuf",
                 "X-Prometheus-Remote-Write-Version": "0.1.0"
             }
         )
-        if response.status_code in [200, 204]:
-            print(f"✅ Metric {metric_name} sent successfully")
-            return True
-        else:
-            print(f"❌ Failed to send metric {metric_name}: {response.text}")
+        
+        if response.status_code not in [200, 204]:
+            print(f"⚠️ Error mengirim metrik {metric_name}: {response.text}")
             return False
+            
+        return True
     except Exception as e:
-        print(f"❌ Error sending metric {metric_name}: {e}")
+        print(f"⚠️ Error mengirim metrik {metric_name}: {str(e)}")
         return False
 
 def send_log_to_loki(log_message, log_level="info", labels=None, numeric_values=None):
@@ -231,26 +254,51 @@ def send_log_to_loki(log_message, log_level="info", labels=None, numeric_values=
         print(f"Error sending log to Loki: {e}")
         return False
 
-# Supabase configuration
-supabase: Client = create_client(
-    os.environ.get("SUPABASE_URL", ""),
-    os.environ.get("SUPABASE_KEY", "")
-)
+# Inisialisasi Supabase client tanpa proxy
+try:
+    # Dapatkan credentials
+    supabase_url = os.environ.get("SUPABASE_URL")
+    supabase_key = os.environ.get("SUPABASE_KEY")
+    
+    # Validasi credentials
+    if not supabase_url or not supabase_key:
+        print("⚠️ Supabase credentials tidak lengkap")
+        supabase = None
+    else:
+        print(f"🔄 Mencoba menghubungkan ke Supabase...")
+        # Inisialisasi tanpa opsi tambahan
+        supabase = create_client(supabase_url, supabase_key)
+        print("✅ Berhasil terhubung ke Supabase")
+except Exception as e:
+    print(f"❌ Error initializing Supabase client: {str(e)}")
+    print("⚠️ Melanjutkan tanpa Supabase...")
+    supabase = None
 
 def save_metrics_to_supabase(metrics, phase="train"):
-    """Save metrics to Supabase with simplified structure"""
+    """Save metrics to Supabase with error handling"""
+    if supabase is None:
+        print("⚠️ Supabase client tidak tersedia, melewati penyimpanan metrik")
+        return False
+        
     try:
+        # Validasi metrics
+        if not isinstance(metrics, dict) or "accuracy" not in metrics or "loss" not in metrics:
+            print("❌ Format metrik tidak valid")
+            return False
+            
         data = {
-            "accuracy": float(metrics["accuracy"]),  # Pastikan nilai adalah float
-            "loss": float(metrics["loss"]),         # Pastikan nilai adalah float
-            "source": phase                         # train, validation, atau test
+            "accuracy": float(metrics["accuracy"]),
+            "loss": float(metrics["loss"]),
+            "source": phase,
+            "created_at": datetime.now().isoformat()
         }
         
         result = supabase.table("model_metrics").insert(data).execute()
-        print(f"✅ Saved {phase} metrics to Supabase")
+        print(f"✅ Berhasil menyimpan metrik {phase} ke Supabase")
         return True
     except Exception as e:
-        print(f"❌ Error saving metrics to Supabase: {e}")
+        print(f"❌ Error menyimpan metrik ke Supabase: {str(e)}")
+        print("⚠️ Melanjutkan proses training...")
         return False
 
 def send_batch_log_to_loki(batch_num, total_batches, phase="train", level="debug"):
@@ -323,9 +371,16 @@ def send_batch_metrics_to_loki(batch_metrics, phase="train", level="info"):
         print(f"Error sending batch metrics: {e}")
         return False
 
+def calculate_moving_average(buffer, window_size=5):
+    """Hitung moving average dari buffer"""
+    if len(buffer) < window_size:
+        return sum(buffer) / len(buffer)
+    return sum(buffer[-window_size:]) / window_size
+
 # Training function
 def train_model(model, train_loader, val_loader, criterion, optimizer, num_epochs, device):
     best_val_loss = float('inf')
+    best_model_state = None
     
     # Inisialisasi buffer untuk moving average
     train_loss_buffer = []
@@ -334,113 +389,138 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
     val_acc_buffer = []
     window_size = 5  # Ukuran window untuk moving average
     
-    for epoch in range(num_epochs):
-        print(f"\nEpoch {epoch+1}/{num_epochs}")
-        
-        # Training phase
-        model.train()
-        running_loss = 0.0
-        running_correct = 0
-        running_total = 0
-        
-        for i, (images, labels) in enumerate(train_loader):
-            if i >= train_batches:
-                break
+    try:
+        for epoch in range(num_epochs):
+            print(f"\nEpoch {epoch+1}/{num_epochs}")
             
-            images, labels = images.to(device), labels.to(device)
-            optimizer.zero_grad()
-            outputs = model(inputs)
-            loss = criterion(outputs, labels)
-            loss.backward()
-            optimizer.step()
+            # Training phase
+            model.train()
+            running_loss = 0.0
+            running_correct = 0
+            running_total = 0
             
-            # Hitung metrik per batch
-            batch_loss = loss.item()
-            _, predicted = torch.max(outputs.data, 1)
-            batch_correct = (predicted == labels).sum().item()
-            batch_total = labels.size(0)
-            batch_accuracy = 100 * batch_correct / batch_total
-            
-            # Tambahkan ke buffer
-            train_loss_buffer.append(batch_loss)
-            train_acc_buffer.append(batch_accuracy)
-            
-            # Kirim moving average setiap 5 batch
-            if len(train_loss_buffer) >= window_size:
-                avg_train_loss = sum(train_loss_buffer[-window_size:]) / window_size
-                avg_train_acc = sum(train_acc_buffer[-window_size:]) / window_size
-                
-                # Kirim ke Prometheus
-                send_metric_to_prometheus(
-                    "train_loss",
-                    avg_train_loss,
-                    {"type": "moving_average"}
-                )
-                send_metric_to_prometheus(
-                    "train_accuracy",
-                    avg_train_acc,
-                    {"type": "moving_average"}
-                )
-                
-                print(f"Batch {i+1}/{train_batches} - Moving Avg Loss: {avg_train_loss:.4f} - Acc: {avg_train_acc:.2f}%")
-        
-        # Validation phase
-        model.eval()
-        with torch.no_grad():
-            for i, (images, labels) in enumerate(val_loader):
-                if i >= val_batches:
-                    break
-                
-                images, labels = images.to(device), labels.to(device)
-                outputs = model(images)
-                loss = criterion(outputs, labels)
-                
-                # Hitung metrik per batch
-                batch_loss = loss.item()
-                _, predicted = torch.max(outputs.data, 1)
-                batch_correct = (predicted == labels).sum().item()
-                batch_total = labels.size(0)
-                batch_accuracy = 100 * batch_correct / batch_total
-                
-                # Tambahkan ke buffer
-                val_loss_buffer.append(batch_loss)
-                val_acc_buffer.append(batch_accuracy)
-                
-                # Kirim moving average setiap 5 batch
-                if len(val_loss_buffer) >= window_size:
-                    avg_val_loss = sum(val_loss_buffer[-window_size:]) / window_size
-                    avg_val_acc = sum(val_acc_buffer[-window_size:]) / window_size
+            try:
+                for i, (images, labels) in enumerate(train_loader):
+                    if i >= train_batches:
+                        break
                     
-                    # Kirim ke Prometheus
-                    send_metric_to_prometheus(
-                        "val_loss",
-                        avg_val_loss,
-                        {"type": "moving_average"}
-                    )
-                    send_metric_to_prometheus(
-                        "val_accuracy",
-                        avg_val_acc,
-                        {"type": "moving_average"}
-                    )
+                    try:
+                        images, labels = images.to(device), labels.to(device)
+                        optimizer.zero_grad()
+                        
+                        # Forward pass
+                        outputs = model(images)
+                        loss = criterion(outputs, labels)
+                        
+                        # Backward pass
+                        loss.backward()
+                        optimizer.step()
+                        
+                        # Hitung metrik per batch
+                        batch_loss = loss.item()
+                        _, predicted = torch.max(outputs.data, 1)
+                        batch_correct = (predicted == labels).sum().item()
+                        batch_total = labels.size(0)
+                        batch_accuracy = 100 * batch_correct / batch_total
+                        
+                        # Update running metrics
+                        running_loss += batch_loss
+                        running_correct += batch_correct
+                        running_total += batch_total
+                        
+                        # Tambahkan ke buffer
+                        train_loss_buffer.append(batch_loss)
+                        train_acc_buffer.append(batch_accuracy)
+                        
+                        # Kirim moving average setiap window_size batch
+                        if len(train_loss_buffer) >= window_size:
+                            # Hitung moving average
+                            avg_train_loss = calculate_moving_average(train_loss_buffer, window_size)
+                            avg_train_acc = calculate_moving_average(train_acc_buffer, window_size)
+                            
+                            # Kirim metrik ke Prometheus
+                            send_metric_to_prometheus("train_loss", avg_train_loss)
+                            send_metric_to_prometheus("train_accuracy", avg_train_acc)
+                            
+                            print(f"Batch {i+1}/{train_batches} - Moving Avg Loss: {avg_train_loss:.4f} - Acc: {avg_train_acc:.2f}%")
                     
-                    print(f"Val Batch {i+1}/{val_batches} - Moving Avg Loss: {avg_val_loss:.4f} - Acc: {avg_val_acc:.2f}%")
+                    except Exception as batch_error:
+                        print(f"⚠️ Error pada batch {i+1}: {str(batch_error)}")
+                        continue
+                
+                # Validation phase
+                model.eval()
+                val_loss = 0.0
+                val_correct = 0
+                val_total = 0
+                
+                with torch.no_grad():
+                    for i, (images, labels) in enumerate(val_loader):
+                        if i >= val_batches:
+                            break
+                            
+                        try:
+                            images, labels = images.to(device), labels.to(device)
+                            outputs = model(images)
+                            loss = criterion(outputs, labels)
+                            
+                            # Hitung metrik
+                            batch_loss = loss.item()
+                            _, predicted = torch.max(outputs.data, 1)
+                            batch_correct = (predicted == labels).sum().item()
+                            batch_total = labels.size(0)
+                            
+                            # Update metrics
+                            val_loss += batch_loss
+                            val_correct += batch_correct
+                            val_total += batch_total
+                            
+                            # Tambahkan ke buffer validasi
+                            val_loss_buffer.append(batch_loss)
+                            val_acc_buffer.append(100 * batch_correct / batch_total)
+                            
+                            # Kirim moving average setiap window_size batch
+                            if len(val_loss_buffer) >= window_size:
+                                avg_val_loss = calculate_moving_average(val_loss_buffer, window_size)
+                                avg_val_acc = calculate_moving_average(val_acc_buffer, window_size)
+                                
+                                # Kirim metrik ke Prometheus
+                                send_metric_to_prometheus("val_loss", avg_val_loss)
+                                send_metric_to_prometheus("val_accuracy", avg_val_acc)
+                            
+                        except Exception as val_batch_error:
+                            print(f"⚠️ Error pada validation batch {i+1}: {str(val_batch_error)}")
+                            continue
+                
+                # Hitung metrik epoch
+                epoch_val_loss = val_loss / val_batches
+                epoch_val_acc = 100 * val_correct / val_total
+                
+                # Simpan model terbaik
+                if epoch_val_loss < best_val_loss:
+                    best_val_loss = epoch_val_loss
+                    best_model_state = copy.deepcopy(model.state_dict())
+                    print("✨ Model terbaik baru disimpan!")
+                    
+                    # Simpan model
+                    try:
+                        torch.save(best_model_state, os.path.join('model', 'best_model_weights.pth'))
+                    except Exception as save_error:
+                        print(f"⚠️ Error menyimpan model: {str(save_error)}")
+                
+            except Exception as epoch_error:
+                print(f"⚠️ Error pada epoch {epoch+1}: {str(epoch_error)}")
+                continue
         
-        # Batasi ukuran buffer
-        if len(train_loss_buffer) > train_batches:
-            train_loss_buffer = train_loss_buffer[-train_batches:]
-            train_acc_buffer = train_acc_buffer[-train_batches:]
-        if len(val_loss_buffer) > val_batches:
-            val_loss_buffer = val_loss_buffer[-val_batches:]
-            val_acc_buffer = val_acc_buffer[-val_batches:]
+        print("\n✅ Training selesai!")
+        return train_loss_buffer, val_loss_buffer
         
-        # Save best model berdasarkan rata-rata val_loss terakhir
-        current_val_loss = sum(val_loss_buffer[-window_size:]) / window_size
-        if current_val_loss < best_val_loss:
-            best_val_loss = current_val_loss
-            torch.save(model.state_dict(), 'best_model.pth')
-            print("✨ New best model saved!")
-    
-    return train_loss_buffer, val_loss_buffer
+    except Exception as training_error:
+        print(f"❌ Error fatal dalam training: {str(training_error)}")
+        if best_model_state is not None:
+            print("⚠️ Mengembalikan model terbaik yang tersimpan...")
+            model.load_state_dict(best_model_state)
+        return train_loss_buffer, val_loss_buffer
 
 # Main script
 if __name__ == "__main__":

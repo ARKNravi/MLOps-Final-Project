@@ -59,12 +59,39 @@ jobs:
                   PROMETHEUS_USERNAME: "1902030"
                   PROMETHEUS_REMOTE_WRITE_URL: ${{ secrets.PROMETHEUS_REMOTE_WRITE_URL }}
               run: |
-                  # Install dependencies
-                  sudo apt-get update
-                  sudo apt-get install -y python3-pip protobuf-compiler
-                  pip install prometheus-client requests python-snappy protobuf
+                  # Install dependencies dengan versi spesifik
+                  sudo apt-get update && sudo apt-get install -y python3-pip
+                  sudo apt-get install -y protobuf-compiler
+                  pip3 install prometheus-client requests python-snappy 'protobuf==3.20.3'  # Tetapkan versi protobuf yang kompatibel
 
-                  # Generate protobuf files
+                  # Buat file proto secara inline
+                  cat > remote_write.proto << EOF
+                  syntax = "proto3";
+                  package prometheus;
+
+                  option go_package = "prompb";
+
+                  message WriteRequest {
+                    repeated TimeSeries timeseries = 1;
+                  }
+
+                  message TimeSeries {
+                    repeated Label labels = 1;
+                    repeated Sample samples = 2;
+                  }
+
+                  message Label {
+                    string name = 1;
+                    string value = 2;
+                  }
+
+                  message Sample {
+                    double value = 1;
+                    int64 timestamp = 2;
+                  }
+                  EOF
+
+                  # Generate Python file dari proto dengan versi yang benar
                   protoc --python_out=. remote_write.proto
 
                   # Verifikasi file yang dibuat
@@ -74,22 +101,17 @@ jobs:
                   cat > send_metric.py << EOF
                   import os
                   import json
-                  import snappy as python_snappy
+                  import snappy
                   import requests
                   from remote_write_pb2 import WriteRequest, TimeSeries, Label, Sample
                   from datetime import datetime, timezone
 
                   def send_metric():
-                      # Buat timestamp dalam format yang benar (millisekon)
                       timestamp_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
                       
-                      # Inisialisasi WriteRequest
                       write_req = WriteRequest()
-                      
-                      # Tambahkan TimeSeries
                       ts = write_req.timeseries.add()
                       
-                      # Tambahkan Labels
                       labels = [
                           ("__name__", "test_metric"),
                           ("job", "github_actions_test"),
@@ -102,16 +124,12 @@ jobs:
                           label.name = name
                           label.value = value
                       
-                      # Tambahkan Sample
                       sample = ts.samples.add()
                       sample.value = 1.0
                       sample.timestamp = timestamp_ms
                       
-                      # Serialize ke Protobuf
                       data = write_req.SerializeToString()
-                      
-                      # Kompresi dengan Snappy
-                      compressed_data = python_snappy.compress(data)
+                      compressed_data = snappy.compress(data)
 
                       url = os.environ['PROMETHEUS_REMOTE_WRITE_URL']
                       username = os.environ['PROMETHEUS_USERNAME']
@@ -174,7 +192,7 @@ jobs:
                   import os
                   import requests
                   import json
-                  imaport time
+                  import time
                   from datetime import datetime
 
                   def test_loki_connection():
@@ -558,8 +576,9 @@ jobs:
               run: |
                   pip install matplotlib seaborn scikit-learn pandas numpy mlflow
                   pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-                  pip install supabase==2.3.0
-                  pip install python-snappy  # Tambahkan ini untuk mengatasi error snappy
+                  pip install 'protobuf==3.20.3'  # Tetapkan versi protobuf yang kompatibel
+                  pip install 'supabase==2.3.0'  # Tetapkan versi supabase yang stabil
+                  pip install python-snappy  # Untuk kompresi snappy
 
             - name: Build Dependencies Image
               run: |
@@ -568,21 +587,38 @@ jobs:
 
             - name: Install Prometheus Dependencies
               run: |
-                  sudo apt-get update
-                  sudo apt-get install -y python3-pip
+                  sudo apt-get update && sudo apt-get install -y python3-pip libsnappy-dev
+                  sudo apt-get install -y protobuf-compiler
+                  pip3 install prometheus-client requests python-snappy 'protobuf==3.20.3'
 
-                  # Install latest protoc
-                  PROTOC_ZIP=protoc-3.19.0-linux-x86_64.zip
-                  curl -OL https://github.com/protocolbuffers/protobuf/releases/download/v3.19.0/$PROTOC_ZIP
-                  sudo unzip -o $PROTOC_ZIP -d /usr/local bin/protoc
-                  sudo unzip -o $PROTOC_ZIP -d /usr/local 'include/*'
-                  rm -f $PROTOC_ZIP
+                  # Setup Prometheus proto file
+                  cat > script/remote_write.proto << EOF
+                  syntax = "proto3";
+                  package prometheus;
 
-                  # Install Python dependencies
-                  pip install prometheus-client requests python-snappy protobuf>=3.19.0
+                  option go_package = "prompb";
 
-                  # Generate protobuf files
-                  protoc --python_out=. remote_write.proto
+                  message WriteRequest {
+                    repeated TimeSeries timeseries = 1;
+                  }
+
+                  message TimeSeries {
+                    repeated Label labels = 1;
+                    repeated Sample samples = 2;
+                  }
+
+                  message Label {
+                    string name = 1;
+                    string value = 2;
+                  }
+
+                  message Sample {
+                    double value = 1;
+                    int64 timestamp = 2;
+                  }
+                  EOF
+
+                  cd script && protoc --python_out=. remote_write.proto && cd ..
 
             - name: Train and Evaluate Model
               env:
@@ -601,6 +637,7 @@ jobs:
                   MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
                   SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
                   SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+                  PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: "python"
               run: |
                   docker run \
                       -e DOCKER_USERNAME="$DOCKER_USERNAME" \
@@ -618,16 +655,45 @@ jobs:
                       -e MLFLOW_TRACKING_URI="$MLFLOW_TRACKING_URI" \
                       -e SUPABASE_URL="$SUPABASE_URL" \
                       -e SUPABASE_KEY="$SUPABASE_KEY" \
+                      -e PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION="python" \
                       -v ${{ github.workspace }}:/app \
                       -w /app \
                       --network host \
                       ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest \
                       bash -c "
-                        echo 'Installing additional dependencies...' &&
-                        pip install supabase==1.0.3 &&
-                        echo 'Starting training...' &&
-                        python script/train.py &&
-                        python script/test.py
+                          echo 'Installing additional dependencies...' &&
+                          apt-get update && apt-get install -y protobuf-compiler &&
+                          pip uninstall -y supabase &&
+                          pip install --no-cache-dir 'supabase==1.0.3' 'protobuf==3.20.3' python-snappy &&
+                          
+                          # Setup Prometheus proto file
+                          cd script &&
+                          echo 'syntax = \"proto3\";
+                          package prometheus;
+                          option go_package = \"prompb\";
+                          message WriteRequest {
+                              repeated TimeSeries timeseries = 1;
+                          }
+                          message TimeSeries {
+                              repeated Label labels = 1;
+                              repeated Sample samples = 2;
+                          }
+                          message Label {
+                              string name = 1;
+                              string value = 2;
+                          }
+                          message Sample {
+                              double value = 1;
+                              int64 timestamp = 2;
+                          }' > remote_write.proto &&
+                          
+                          # Generate Python file dari proto
+                          protoc --python_out=. remote_write.proto &&
+                          cd .. &&
+                          
+                          echo 'Starting training...' &&
+                          python script/train.py &&
+                          python script/test.py
                       "
 
     # Step 3: Build and Push Final Docker Image with Model
