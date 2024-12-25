@@ -40,10 +40,19 @@ jobs:
                   cp requirements-deploy.txt vercel/output/functions/
                   cp vercel.json vercel/output/
 
-                  # Verify Python version
-                  python --version
-                  which python
-                  which pip
+                  # Create Python symlink
+                  sudo ln -sf $(which python3.9) /usr/local/bin/python3.9
+                  sudo ln -sf $(which pip3) /usr/local/bin/pip3.9
+
+                  # Verify Python setup
+                  echo "Python version:"
+                  python3.9 --version
+                  echo "Pip version:"
+                  pip3.9 --version
+                  echo "Python path:"
+                  which python3.9
+                  echo "Pip path:"
+                  which pip3.9
 
                   # Verify files
                   echo "Checking deployment files:"
@@ -58,6 +67,7 @@ jobs:
               run: |
                   echo "Starting Vercel deployment..."
                   vercel pull --yes --environment=production --token=$VERCEL_TOKEN
+                  vercel build --token=$VERCEL_TOKEN
                   vercel deploy --prod --token=$VERCEL_TOKEN
 
             - name: Cleanup
@@ -65,3 +75,5 @@ jobs:
               run: |
                   rm -rf vercel/output/functions
                   rm -rf vercel/output/static
+                  sudo rm -f /usr/local/bin/python3.9
+                  sudo rm -f /usr/local/bin/pip3.9
