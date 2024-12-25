@@ -60,37 +60,11 @@ jobs:
                   PROMETHEUS_REMOTE_WRITE_URL: ${{ secrets.PROMETHEUS_REMOTE_WRITE_URL }}
               run: |
                   # Install dependencies
-                  sudo apt-get update && sudo apt-get install -y python3-pip
-                  sudo apt-get install -y protobuf-compiler
-                  pip3 install prometheus-client requests python-snappy protobuf
-                  # Buat file proto secara inline
-                  cat > remote_write.proto << EOF
-                  syntax = "proto3";
-                  package prometheus;
+                  sudo apt-get update
+                  sudo apt-get install -y python3-pip protobuf-compiler
+                  pip install prometheus-client requests python-snappy protobuf
 
-                  option go_package = "prompb";
-
-                  message WriteRequest {
-                    repeated TimeSeries timeseries = 1;
-                  }
-
-                  message TimeSeries {
-                    repeated Label labels = 1;
-                    repeated Sample samples = 2;
-                  }
-
-                  message Label {
-                    string name = 1;
-                    string value = 2;
-                  }
-
-                  message Sample {
-                    double value = 1;
-                    int64 timestamp = 2;
-                  }
-                  EOF
-
-                  # Generate Python file dari proto
+                  # Generate protobuf files
                   protoc --python_out=. remote_write.proto
 
                   # Verifikasi file yang dibuat
@@ -200,7 +174,7 @@ jobs:
                   import os
                   import requests
                   import json
-                  import time
+                  imaport time
                   from datetime import datetime
 
                   def test_loki_connection():
@@ -594,38 +568,21 @@ jobs:
 
             - name: Install Prometheus Dependencies
               run: |
-                  sudo apt-get update && sudo apt-get install -y python3-pip libsnappy-dev
-                  sudo apt-get install -y protobuf-compiler
-                  pip3 install prometheus-client requests python-snappy protobuf supabase==2.3.0 mlflow
+                  sudo apt-get update
+                  sudo apt-get install -y python3-pip
 
-                  # Setup Prometheus proto file
-                  cat > remote_write.proto << EOF
-                  syntax = "proto3";
-                  package prometheus;
+                  # Install latest protoc
+                  PROTOC_ZIP=protoc-3.19.0-linux-x86_64.zip
+                  curl -OL https://github.com/protocolbuffers/protobuf/releases/download/v3.19.0/$PROTOC_ZIP
+                  sudo unzip -o $PROTOC_ZIP -d /usr/local bin/protoc
+                  sudo unzip -o $PROTOC_ZIP -d /usr/local 'include/*'
+                  rm -f $PROTOC_ZIP
 
-                  option go_package = "prompb";
+                  # Install Python dependencies
+                  pip install prometheus-client requests python-snappy protobuf>=3.19.0
 
-                  message WriteRequest {
-                    repeated TimeSeries timeseries = 1;
-                  }
-
-                  message TimeSeries {
-                    repeated Label labels = 1;
-                    repeated Sample samples = 2;
-                  }
-
-                  message Label {
-                    string name = 1;
-                    string value = 2;
-                  }
-
-                  message Sample {
-                    double value = 1;
-                    int64 timestamp = 2;
-                  }
-                  EOF
-
-                  protoc --python_out=script/ remote_write.proto
+                  # Generate protobuf files
+                  protoc --python_out=. remote_write.proto
 
             - name: Train and Evaluate Model
               env:
