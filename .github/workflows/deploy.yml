@@ -32,17 +32,13 @@ jobs:
             - name: Prepare for deployment
               run: |
                   # Create necessary directories
-                  mkdir -p .vercel/output/functions/script
-                  mkdir -p .vercel/output/static
+                  mkdir -p vercel/output/functions/script
+                  mkdir -p vercel/output/static
 
                   # Copy application files
-                  cp -r script/* .vercel/output/functions/script/
-                  cp requirements-deploy.txt .vercel/output/functions/
-                  cp vercel.json .vercel/output/
-
-                  # Copy configuration files
-                  cp vercel/output/builds.json .vercel/output/
-                  cp vercel/output/config.json .vercel/output/
+                  cp -r script/* vercel/output/functions/script/
+                  cp requirements-deploy.txt vercel/output/functions/
+                  cp vercel.json vercel/output/
 
                   # Verify Python version
                   python --version
@@ -51,8 +47,8 @@ jobs:
 
                   # Verify files
                   echo "Checking deployment files:"
-                  ls -la .vercel/output/functions/script/
-                  ls -la .vercel/output/
+                  ls -la vercel/output/functions/script/
+                  ls -la vercel/output/
 
             - name: Deploy to Vercel
               env:
@@ -62,11 +58,10 @@ jobs:
               run: |
                   echo "Starting Vercel deployment..."
                   vercel pull --yes --environment=production --token=$VERCEL_TOKEN
-                  vercel build --token=$VERCEL_TOKEN
-                  vercel deploy --prebuilt --prod --token=$VERCEL_TOKEN
+                  vercel deploy --prod --token=$VERCEL_TOKEN
 
             - name: Cleanup
               if: always()
               run: |
-                  rm -rf .vercel/output/functions
-                  rm -rf .vercel/output/static
+                  rm -rf vercel/output/functions
+                  rm -rf vercel/output/static
