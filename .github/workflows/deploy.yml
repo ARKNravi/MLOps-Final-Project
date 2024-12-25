@@ -31,15 +31,20 @@ jobs:
 
             - name: Prepare for deployment
               run: |
-                  # Create necessary directories
-                  mkdir -p vercel/output/functions/script
-                  mkdir -p vercel/output/static
+                  # Create deployment directory
+                  mkdir -p deploy
+
+                  # Create necessary structure
+                  mkdir -p deploy/script
+                  mkdir -p deploy/vercel/output
 
                   # Copy only necessary files
-                  cp -r script/app.py vercel/output/functions/script/
-                  cp -r script/utils.py vercel/output/functions/script/ 2>/dev/null || :
-                  cp requirements-deploy.txt vercel/output/functions/
-                  cp vercel.json vercel/output/
+                  cp script/app.py deploy/script/
+                  cp script/utils.py deploy/script/ 2>/dev/null || :
+                  cp requirements-deploy.txt deploy/
+                  cp vercel.json deploy/
+                  cp vercel/output/builds.json deploy/vercel/output/
+                  cp vercel/output/config.json deploy/vercel/output/
 
                   # Create Python symlink
                   sudo ln -sf $(which python3.9) /usr/local/bin/python3.9
@@ -56,6 +61,7 @@ jobs:
                   VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
                   VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
                   VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+              working-directory: ./deploy
               run: |
                   echo "Starting Vercel deployment..."
                   vercel pull --yes --environment=production --token=$VERCEL_TOKEN
@@ -65,7 +71,6 @@ jobs:
             - name: Cleanup
               if: always()
               run: |
-                  rm -rf vercel/output/functions
-                  rm -rf vercel/output/static
+                  rm -rf deploy
                   sudo rm -f /usr/local/bin/python3.9
                   sudo rm -f /usr/local/bin/pip3.9

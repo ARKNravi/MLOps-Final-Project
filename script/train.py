@@ -318,22 +318,21 @@ def send_metrics_to_prometheus(metric_name, value, labels=None):
 
 # Training function
 def train_model(model, train_loader, val_loader, criterion, optimizer, num_epochs, device):
-    # Set debug mode for quick training
-    debug_mode = False  # Disable debug mode
-    print(f"🚀 Running full training: {num_epochs} epochs, {train_batches} train batches, {val_batches} val batches")
-    
     best_val_loss = float('inf')
     train_losses = []
     val_losses = []
     
     for epoch in range(num_epochs):
+        # Training phase
         model.train()
         running_loss = 0.0
         correct = 0
         total = 0
         batch_count = 0
         
-        print(f"\ntrain phase:")
+        print(f"\nEpoch {epoch+1}/{num_epochs}")
+        print("Training phase:")
+        
         for i, (images, labels) in enumerate(train_loader):
             if i >= train_batches:
                 break
@@ -352,40 +351,46 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
             correct += (predicted == labels).sum().item()
             batch_count += 1
             
-            if i % 10 == 0:  # Log every 10 batches
-                print(f"Batch {i}/{train_batches}")
-                print(f"Batch {i}/{train_batches} - Loss: {loss.item():.4f}")
-                
-            # Send metrics every 10 batches
+            # Calculate batch metrics
+            batch_loss = loss.item()
+            batch_accuracy = 100 * (predicted == labels).sum().item() / labels.size(0)
+            
+            # Send batch metrics to Prometheus and Loki
+            send_metrics_to_prometheus(
+                'train_loss_batch', 
+                batch_loss,
+                {
+                    'epoch': str(epoch + 1),
+                    'batch': str(i + 1),
+                    'phase': 'train'
+                }
+            )
+            send_metrics_to_prometheus(
+                'train_accuracy_batch',
+                batch_accuracy,
+                {
+                    'epoch': str(epoch + 1),
+                    'batch': str(i + 1),
+                    'phase': 'train'
+                }
+            )
+            
             if i % 10 == 0:
-                send_metric_to_prometheus(
-                    "train_loss",
-                    loss.item(),
-                    {"epoch": str(epoch + 1), "batch": str(i + 1)}
-                )
+                print(f"Batch {i}/{train_batches} - Loss: {batch_loss:.4f} - Acc: {batch_accuracy:.2f}%")
         
+        # Calculate epoch metrics
         avg_train_loss = running_loss / batch_count
         train_accuracy = 100 * correct / total
         train_losses.append(avg_train_loss)
-        
-        # Save training metrics to Supabase
-        save_metrics_to_supabase({
-            "loss": avg_train_loss,
-            "accuracy": train_accuracy,
-            "epoch": epoch + 1,
-            "phase": "train"
-        })
-        
-        print(f'train Loss: {avg_train_loss:.4f} Acc: {train_accuracy:.4f}')
         
         # Validation phase
         model.eval()
         val_loss = 0.0
         val_correct = 0
         val_total = 0
-        batch_count = 0
+        val_batch_count = 0
         
-        print(f"\nval phase:")
+        print("\nValidation phase:")
         with torch.no_grad():
             for i, (images, labels) in enumerate(val_loader):
                 if i >= val_batches:
@@ -399,35 +404,68 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
                 _, predicted = torch.max(outputs.data, 1)
                 val_total += labels.size(0)
                 val_correct += (predicted == labels).sum().item()
-                batch_count += 1
+                val_batch_count += 1
                 
-                if i % 10 == 0:  # Log every 10 batches
-                    print(f"Batch {i}/{val_batches}")
-                    print(f"Batch {i}/{val_batches} - Loss: {loss.item():.4f}")
+                # Calculate batch metrics
+                batch_loss = loss.item()
+                batch_accuracy = 100 * (predicted == labels).sum().item() / labels.size(0)
+                
+                # Send batch metrics to Prometheus and Loki
+                send_metrics_to_prometheus(
+                    'val_loss_batch',
+                    batch_loss,
+                    {
+                        'epoch': str(epoch + 1),
+                        'batch': str(i + 1),
+                        'phase': 'validation'
+                    }
+                )
+                send_metrics_to_prometheus(
+                    'val_accuracy_batch',
+                    batch_accuracy,
+                    {
+                        'epoch': str(epoch + 1),
+                        'batch': str(i + 1),
+                        'phase': 'validation'
+                    }
+                )
+                
+                if i % 10 == 0:
+                    print(f"Batch {i}/{val_batches} - Loss: {batch_loss:.4f} - Acc: {batch_accuracy:.2f}%")
         
-        avg_val_loss = val_loss / batch_count
+        # Calculate epoch metrics
+        avg_val_loss = val_loss / val_batch_count
         val_accuracy = 100 * val_correct / val_total
         val_losses.append(avg_val_loss)
         
-        # Save validation metrics to Supabase
-        save_metrics_to_supabase({
-            "loss": avg_val_loss,
-            "accuracy": val_accuracy,
-            "epoch": epoch + 1,
-            "phase": "validation"
-        })
+        # Send epoch metrics to Prometheus and Loki
+        metrics = {
+            'train_loss_epoch': avg_train_loss,
+            'train_accuracy_epoch': train_accuracy,
+            'val_loss_epoch': avg_val_loss,
+            'val_accuracy_epoch': val_accuracy
+        }
         
-        print(f'val Loss: {avg_val_loss:.4f} Acc: {val_accuracy:.4f}')
+        for metric_name, value in metrics.items():
+            send_metrics_to_prometheus(
+                metric_name,
+                value,
+                {
+                    'epoch': str(epoch + 1),
+                    'phase': 'train' if 'train' in metric_name else 'validation'
+                }
+            )
         
-        # Send metrics to Prometheus & Loki
-        send_metrics_to_prometheus('train_loss', avg_train_loss, {'epoch': str(epoch)})
-        send_metrics_to_prometheus('train_accuracy', train_accuracy, {'epoch': str(epoch)})
-        send_metrics_to_prometheus('val_loss', avg_val_loss, {'epoch': str(epoch)})
-        send_metrics_to_prometheus('val_accuracy', val_accuracy, {'epoch': str(epoch)})
+        # Print epoch summary
+        print(f"\nEpoch {epoch+1} Summary:")
+        print(f"Train Loss: {avg_train_loss:.4f} - Train Acc: {train_accuracy:.2f}%")
+        print(f"Val Loss: {avg_val_loss:.4f} - Val Acc: {val_accuracy:.2f}%")
         
+        # Save best model
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
             torch.save(model.state_dict(), 'best_model.pth')
+            print("✨ New best model saved!")
     
     return train_losses, val_losses
 
