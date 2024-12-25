@@ -24,28 +24,30 @@ jobs:
             - name: Install dependencies
               run: |
                   python -m pip install --upgrade pip
-                  pip install -r requirements-deploy.txt
+                  pip install -r requirements-deploy.txt --no-cache-dir
 
             - name: Install Vercel CLI
               run: npm install --global vercel@latest
 
-            - name: Create project structure
+            - name: Prepare for deployment
               run: |
-                  # Buat struktur direktori yang benar
-                  mkdir -p .vercel/output/functions
+                  # Create necessary directories
+                  mkdir -p .vercel/output/functions/script
                   mkdir -p .vercel/output/static
 
-                  # Copy file-file yang diperlukan
-                  cp -r script .vercel/output/functions/
-                  cp requirements-deploy.txt .vercel/output/
+                  # Copy application files
+                  cp -r script/* .vercel/output/functions/script/
+                  cp requirements-deploy.txt .vercel/output/functions/
                   cp vercel.json .vercel/output/
 
-                  # Copy builds.json dan config.json dari vercel/output
+                  # Copy configuration files
                   cp vercel/output/builds.json .vercel/output/
                   cp vercel/output/config.json .vercel/output/
 
-                  # Pastikan app.py ada di lokasi yang benar
+                  # Verify files
+                  echo "Checking deployment files:"
                   ls -la .vercel/output/functions/script/
+                  ls -la .vercel/output/
 
             - name: Deploy to Vercel
               env:
@@ -53,7 +55,7 @@ jobs:
                   VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
                   VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
               run: |
-                  echo "Deploying to Vercel..."
+                  echo "Starting Vercel deployment..."
                   vercel pull --yes --environment=production --token=$VERCEL_TOKEN
                   vercel build --token=$VERCEL_TOKEN
                   vercel deploy --prebuilt --prod --token=$VERCEL_TOKEN
