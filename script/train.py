@@ -329,24 +329,24 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
     train_losses = []
     val_losses = []
     
+    # Inisialisasi variabel untuk tracking metrik
+    running_train_loss = 0.0
+    running_train_correct = 0
+    running_train_total = 0
+    running_val_loss = 0.0
+    running_val_correct = 0
+    running_val_total = 0
+    
     for epoch in range(num_epochs):
         print(f"\nEpoch {epoch+1}/{num_epochs}")
         
         # Training phase
         model.train()
-        running_loss = 0.0
-        correct = 0
-        total = 0
         batch_count = 0
         
         for i, (images, labels) in enumerate(train_loader):
             if i >= train_batches:
                 break
-            
-            batch_start_time = time.time()
-            
-            # Log batch processing
-            send_batch_log_to_loki(i+1, train_batches, "train", "debug")
             
             images, labels = images.to(device), labels.to(device)
             optimizer.zero_grad()
@@ -355,59 +355,38 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
             loss.backward()
             optimizer.step()
             
-            # Calculate batch metrics
+            # Akumulasi metrik training
             batch_loss = loss.item()
             _, predicted = torch.max(outputs.data, 1)
-            total += labels.size(0)
-            correct += (predicted == labels).sum().item()
-            batch_accuracy = 100 * correct / total
-            batch_time = time.time() - batch_start_time
-            
-            # Send batch metrics
-            batch_metrics = {
-                "loss": batch_loss,
-                "accuracy": batch_accuracy,
-                "time": batch_time
-            }
-            
-            # Send to Loki
-            send_batch_metrics_to_loki(batch_metrics, "train")
+            running_train_loss += batch_loss
+            running_train_total += labels.size(0)
+            running_train_correct += (predicted == labels).sum().item()
+            batch_count += 1
             
             # Kirim metrik setiap 5 batch
             if (i + 1) % 5 == 0:
-                labels = {
-                    "epoch": str(epoch + 1),
-                    "batch": str(i + 1)
-                }
+                avg_train_loss = running_train_loss / batch_count
+                train_accuracy = 100 * running_train_correct / running_train_total
                 
-                # Kirim metrik training
+                # Kirim metrik training yang terakumulasi
                 send_metric_to_prometheus(
                     "train_loss",
-                    batch_loss,
-                    labels
+                    avg_train_loss,
+                    {"epoch": str(epoch + 1)}
                 )
                 send_metric_to_prometheus(
                     "train_accuracy",
-                    batch_accuracy,
-                    labels
+                    train_accuracy,
+                    {"epoch": str(epoch + 1)}
                 )
-            
-            running_loss += batch_loss
-            batch_count += 1
-            
-            if i % 10 == 0:
-                print(f"Batch {i+1}/{train_batches} - Loss: {batch_loss:.4f} - Acc: {batch_accuracy:.2f}%")
-        
-        # Calculate epoch metrics
-        avg_train_loss = running_loss / batch_count
-        train_accuracy = 100 * correct / total
-        train_losses.append(avg_train_loss)
+                
+                print(f"Batch {i+1}/{train_batches} - Loss: {avg_train_loss:.4f} - Acc: {train_accuracy:.2f}%")
         
         # Validation phase
         model.eval()
-        val_loss = 0.0
-        val_correct = 0
-        val_total = 0
+        running_val_loss = 0.0
+        running_val_correct = 0
+        running_val_total = 0
         val_batch_count = 0
         
         print("\nValidation phase:")
@@ -420,69 +399,47 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
                 outputs = model(images)
                 loss = criterion(outputs, labels)
                 
-                val_loss += loss.item()
-                _, predicted = torch.max(outputs.data, 1)
-                val_total += labels.size(0)
-                val_correct += (predicted == labels).sum().item()
-                val_batch_count += 1
-                
-                # Calculate batch metrics
+                # Akumulasi metrik validation
                 batch_loss = loss.item()
-                batch_accuracy = 100 * (predicted == labels).sum().item() / labels.size(0)
+                _, predicted = torch.max(outputs.data, 1)
+                running_val_loss += batch_loss
+                running_val_total += labels.size(0)
+                running_val_correct += (predicted == labels).sum().item()
+                val_batch_count += 1
                 
                 # Kirim metrik setiap 5 batch
                 if (i + 1) % 5 == 0:
-                    labels = {
-                        "epoch": str(epoch + 1),
-                        "batch": str(i + 1)
-                    }
+                    avg_val_loss = running_val_loss / val_batch_count
+                    val_accuracy = 100 * running_val_correct / running_val_total
                     
-                    # Kirim metrik validation
+                    # Kirim metrik validation yang terakumulasi
                     send_metric_to_prometheus(
                         "val_loss",
-                        batch_loss,
-                        labels
+                        avg_val_loss,
+                        {"epoch": str(epoch + 1)}
                     )
                     send_metric_to_prometheus(
-                        "val_accuracy", 
+                        "val_accuracy",
                         val_accuracy,
-                        labels
+                        {"epoch": str(epoch + 1)}
                     )
-                
-                if i % 10 == 0:
-                    print(f"Batch {i}/{val_batches} - Loss: {batch_loss:.4f} - Acc: {batch_accuracy:.2f}%")
+                    
+                    print(f"Batch {i+1}/{val_batches} - Loss: {avg_val_loss:.4f} - Acc: {val_accuracy:.2f}%")
         
-        # Calculate epoch metrics
-        avg_val_loss = val_loss / val_batch_count
-        val_accuracy = 100 * val_correct / val_total
-        val_losses.append(avg_val_loss)
-        
-        # Send epoch metrics to Prometheus and Loki
-        metrics = {
-            'train_loss_epoch': avg_train_loss,
-            'train_accuracy_epoch': train_accuracy,
-            'val_loss_epoch': avg_val_loss,
-            'val_accuracy_epoch': val_accuracy
-        }
-        
-        for metric_name, value in metrics.items():
-            send_metrics_to_prometheus(
-                metric_name,
-                value,
-                {
-                    'epoch': str(epoch + 1),
-                    'phase': 'train' if 'train' in metric_name else 'validation'
-                }
-            )
+        # Calculate final epoch metrics
+        epoch_train_loss = running_train_loss / batch_count
+        epoch_train_accuracy = 100 * running_train_correct / running_train_total
+        epoch_val_loss = running_val_loss / val_batch_count
+        epoch_val_accuracy = 100 * running_val_correct / running_val_total
         
         # Print epoch summary
         print(f"\nEpoch {epoch+1} Summary:")
-        print(f"Train Loss: {avg_train_loss:.4f} - Train Acc: {train_accuracy:.2f}%")
-        print(f"Val Loss: {avg_val_loss:.4f} - Val Acc: {val_accuracy:.2f}%")
+        print(f"Train Loss: {epoch_train_loss:.4f} - Train Acc: {epoch_train_accuracy:.2f}%")
+        print(f"Val Loss: {epoch_val_loss:.4f} - Val Acc: {epoch_val_accuracy:.2f}%")
         
         # Save best model
-        if avg_val_loss < best_val_loss:
-            best_val_loss = avg_val_loss
+        if epoch_val_loss < best_val_loss:
+            best_val_loss = epoch_val_loss
             torch.save(model.state_dict(), 'best_model.pth')
             print("✨ New best model saved!")
     
