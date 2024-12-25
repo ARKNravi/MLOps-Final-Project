@@ -21,69 +21,45 @@ jobs:
                   python-version: "3.9"
                   cache: "pip"
 
-            - name: Create virtual environment
-              run: python -m venv venv
-
-            - name: Activate virtual environment and install base dependencies
+            - name: Install dependencies
               run: |
-                  source venv/bin/activate
-                  python -m pip install --upgrade pip setuptools wheel
-
-            - name: Install PyTorch
-              run: |
-                  source venv/bin/activate
-                  pip install torch==1.13.1+cpu torchvision==0.14.1+cpu --extra-index-url https://download.pytorch.org/whl/cpu
-
-            - name: Install other dependencies
-              run: |
-                  source venv/bin/activate
-                  pip install fastapi==0.109.0 \
-                            uvicorn==0.25.0 \
-                            Pillow>=9.5.0 \
-                            python-dotenv==1.0.0 \
-                            python-multipart==0.0.6 \
-                            numpy>=1.21.0 \
-                            scikit-learn>=1.0.0
-
-            - name: Verify dependencies
-              run: |
-                  source venv/bin/activate
-                  echo "Checking PyTorch installation..."
-                  python -c "import torch; print(f'PyTorch version: {torch.__version__}')"
-                  echo "Checking NumPy installation..."
-                  python -c "import numpy; print(f'NumPy version: {numpy.__version__}')"
-                  echo "Checking other dependencies..."
-                  pip freeze
+                  python -m pip install --upgrade pip
+                  pip install -r requirements-deploy.txt
 
             - name: Install Vercel CLI
               run: npm install --global vercel@latest
 
-            - name: Prepare deployment
+            - name: Create project structure
               run: |
-                  # Buat direktori deployment
-                  mkdir -p deployment
+                  # Buat struktur direktori yang benar
+                  mkdir -p .vercel/output/functions
+                  mkdir -p .vercel/output/static
 
-                  # Copy file yang diperlukan
-                  cp -r script deployment/
-                  cp requirements-deploy.txt deployment/
-                  cp vercel.json deployment/
+                  # Copy file-file yang diperlukan
+                  cp -r script .vercel/output/functions/
+                  cp requirements-deploy.txt .vercel/output/
+                  cp vercel.json .vercel/output/
 
-                  # Copy vercel output directory
-                  mkdir -p deployment/.vercel
-                  cp -r vercel/output deployment/.vercel/
+                  # Copy builds.json dan config.json dari vercel/output
+                  cp vercel/output/builds.json .vercel/output/
+                  cp vercel/output/config.json .vercel/output/
+
+                  # Pastikan app.py ada di lokasi yang benar
+                  ls -la .vercel/output/functions/script/
 
             - name: Deploy to Vercel
               env:
                   VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
                   VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
                   VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-              working-directory: ./deployment
               run: |
+                  echo "Deploying to Vercel..."
                   vercel pull --yes --environment=production --token=$VERCEL_TOKEN
+                  vercel build --token=$VERCEL_TOKEN
                   vercel deploy --prebuilt --prod --token=$VERCEL_TOKEN
 
             - name: Cleanup
               if: always()
               run: |
-                  rm -rf venv
-                  rm -rf deployment
+                  rm -rf .vercel/output/functions
+                  rm -rf .vercel/output/static

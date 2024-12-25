@@ -3,7 +3,7 @@
     "buildCommand": "pip install -r requirements-deploy.txt",
     "builds": [
         {
-            "src": "script/app.py",
+            "src": "/script/app.py",
             "use": "@vercel/python",
             "config": {
                 "maxLambdaSize": "15mb",
@@ -14,12 +14,12 @@
     "routes": [
         {
             "src": "/(.*)",
-            "dest": "script/app.py"
+            "dest": "/script/app.py"
         }
     ],
     "env": {
         "PYTHON_VERSION": "3.9",
         "PIP_TARGET": ".pip",
-        "PYTHONPATH": "/var/task/.pip"
+        "PYTHONPATH": "/var/task/.pip:/var/task/script"
     }
 }
