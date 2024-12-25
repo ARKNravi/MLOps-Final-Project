@@ -38,57 +38,57 @@ jobs:
 
             - name: Setup Vercel Project
               run: |
-                  # Create .vercel directory
+                  # Create necessary directories
                   mkdir -p .vercel/output/functions/script
+                  mkdir -p .vercel/output/functions/model
                   mkdir -p .vercel/output/static
                   
-                  # Copy Python files
-                  cp script/*.py .vercel/output/functions/script/
-                  
-                  # Copy requirements
+                  # Copy files to their correct locations
+                  cp -r script/* .vercel/output/functions/script/
+                  cp -r model/* .vercel/output/functions/model/
                   cp requirements-deploy.txt .vercel/output/functions/
                   
-                  # Copy model files if they exist
-                  if [ -d "model" ]; then
-                    mkdir -p .vercel/output/functions/model
-                    cp -r model/* .vercel/output/functions/model/
-                  fi
-                  
                   # Create project.json
-                  echo '{"orgId":"${{ secrets.VERCEL_ORG_ID }}","projectId":"${{ secrets.VERCEL_PROJECT_ID }}"}' > .vercel/project.json
+                  echo '{
+                    "orgId": "${{ secrets.VERCEL_ORG_ID }}",
+                    "projectId": "${{ secrets.VERCEL_PROJECT_ID }}"
+                  }' > .vercel/project.json
                   
-                  # Create config.json with version 3
+                  # Copy existing config files
+                  cp vercel/output/builds.json .vercel/output/
+                  
+                  # Create config.json
                   echo '{
                     "version": 3,
                     "routes": [
                       {
                         "src": "/(.*)",
-                        "dest": "/script/app.py"
+                        "dest": "script/app.py"
                       }
-                    ]
+                    ],
+                    "functions": {
+                      "script/app.py": {
+                        "runtime": "python3.9",
+                        "memory": 1024,
+                        "maxDuration": 10
+                      }
+                    }
                   }' > .vercel/output/config.json
                   
-                  # Create builds.json
-                  echo '{
-                    "version": 3,
-                    "builds": [
-                      {
-                        "src": "script/app.py",
-                        "use": "@vercel/python@3.1.49",
-                        "config": {
-                          "maxLambdaSize": "15mb",
-                          "runtime": "python3.9",
-                          "includeFiles": ["model/**", "script/**"]
-                        }
-                      }
-                    ]
-                  }' > .vercel/output/builds.json
+                  # Verify directory structure
+                  echo "=== Directory Structure ==="
+                  tree .vercel/output
                   
-                  # List files for verification
-                  echo "Contents of .vercel/output/functions:"
-                  ls -la .vercel/output/functions
-                  echo "Contents of .vercel/output/functions/script:"
+                  echo "=== Contents of functions/script ==="
                   ls -la .vercel/output/functions/script
+                  
+                  echo "=== Contents of functions/model ==="
+                  ls -la .vercel/output/functions/model
+
+            - name: Create Project Link
+              run: |
+                  mkdir -p .vercel
+                  echo '{"orgId":"${{ secrets.VERCEL_ORG_ID }}","projectId":"${{ secrets.VERCEL_PROJECT_ID }}"}' > .vercel/project.json
 
             - name: Deploy to Vercel
               env:
