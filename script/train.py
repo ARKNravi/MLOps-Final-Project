@@ -142,7 +142,7 @@ def send_metric_to_prometheus(metric_name, value, job="mlops_training"):
     ts = write_req.timeseries.add()
     
     labels = [
-        ("__name__", metric_name),
+        ("__name__", metric_xname),
         ("job", job),
         ("environment", "github_actions")
     ]
@@ -250,35 +250,105 @@ def save_metrics_to_supabase(metrics, phase="train"):
         print(f"❌ Error saving metrics to Supabase: {e}")
         return False
 
-def send_metrics_to_prometheus(metric_name, value, labels=None):
+def send_batch_log_to_loki(batch_num, total_batches, phase="train", level="debug"):
+    """Send batch processing log to Loki"""
+    timestamp = int(time.time() * 1e9)
+    message = f"Processing batch {batch_num}/{total_batches}"
+    
+    payload = {
+        "streams": [{
+            "stream": {
+                "level": level,
+                "job": "mlops_training",
+                "environment": "github_actions"
+            },
+            "values": [
+                [str(timestamp), json.dumps({
+                    "message": message,
+                    "level": level,
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                })]
+            ]
+        }]
+    }
+    
     try:
-        timestamp_ms = int(time.time() * 1000)
-        
-        if not labels:
-            labels = {}
-            
-        # Add default labels
-        labels.update({
-            'environment': 'github_actions',
-            'job': 'mlops_training'
-        })
-        
-        # Format metric data
-        metric_data = {
-            'series': [{
-                'labels': [
-                    {'name': '__name__', 'value': metric_name}
-                ] + [
-                    {'name': k, 'value': str(v)}
-                    for k, v in labels.items()
-                ],
-                'samples': [
-                    [timestamp_ms, str(float(value))]
-                ]
-            }]
-        }
-        
-        # Send to Prometheus
+        response = requests.post(
+            f"{os.environ.get('LOKI_URL')}/loki/api/v1/push",
+            json=payload,
+            auth=(os.environ.get('LOKI_USERNAME'), os.environ.get('LOKI_API_KEY')),
+            headers={"Content-Type": "application/json"}
+        )
+        return response.status_code == 204
+    except Exception as e:
+        print(f"Error sending batch log: {e}")
+        return False
+
+def send_batch_metrics_to_loki(batch_metrics, phase="train", level="info"):
+    """Send batch metrics to Loki"""
+    timestamp = int(time.time() * 1e9)
+    
+    payload = {
+        "streams": [{
+            "stream": {
+                "level": level,
+                "job": "mlops_training",
+                "environment": "github_actions"
+            },
+            "values": [
+                [str(timestamp), json.dumps({
+                    "message": "Batch metrics",
+                    "level": level,
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "batch_loss": batch_metrics["loss"],
+                    "batch_accuracy": batch_metrics["accuracy"],
+                    "batch_time": batch_metrics["time"]
+                })]
+            ]
+        }]
+    }
+    
+    try:
+        response = requests.post(
+            f"{os.environ.get('LOKI_URL')}/loki/api/v1/push",
+            json=payload,
+            auth=(os.environ.get('LOKI_USERNAME'), os.environ.get('LOKI_API_KEY')),
+            headers={"Content-Type": "application/json"}
+        )
+        return response.status_code == 204
+    except Exception as e:
+        print(f"Error sending batch metrics: {e}")
+        return False
+
+def send_metrics_to_prometheus(metric_name, value, labels=None):
+    """Send metrics to Prometheus"""
+    if labels is None:
+        labels = {}
+    
+    timestamp_ms = int(time.time() * 1000)
+    
+    # Add default labels
+    labels.update({
+        "job": "mlops_training",
+        "environment": "github_actions"
+    })
+    
+    # Format metric data
+    metric_data = {
+        "series": [{
+            "labels": [
+                {"name": "__name__", "value": metric_name}
+            ] + [
+                {"name": k, "value": str(v)}
+                for k, v in labels.items()
+            ],
+            "samples": [
+                [timestamp_ms, str(float(value))]
+            ]
+        }]
+    }
+    
+    try:
         response = requests.post(
             os.environ.get('PROMETHEUS_REMOTE_WRITE_URL'),
             json=metric_data,
@@ -288,32 +358,9 @@ def send_metrics_to_prometheus(metric_name, value, labels=None):
                 'X-Scope-OrgID': os.environ.get('PROMETHEUS_USERNAME')
             }
         )
-        
-        # Send to Loki
-        loki_timestamp = int(time.time() * 1e9)
-        loki_payload = {
-            'streams': [{
-                'stream': {
-                    'job': 'mlops_training',
-                    'environment': 'github_actions',
-                    'metric': metric_name
-                },
-                'values': [
-                    [str(loki_timestamp), f"Training metric: {metric_name}={value}"]
-                ]
-            }]
-        }
-        
-        loki_response = requests.post(
-            f"{os.environ.get('LOKI_URL')}/loki/api/v1/push",
-            json=loki_payload,
-            auth=(os.environ.get('LOKI_USERNAME'), os.environ.get('LOKI_API_KEY')),
-            headers={'Content-Type': 'application/json'}
-        )
-        
-        return True
+        return response.status_code in [200, 204]
     except Exception as e:
-        print(f"Error sending metrics: {e}")
+        print(f"Error sending metrics to Prometheus: {e}")
         return False
 
 # Training function
@@ -323,6 +370,8 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
     val_losses = []
     
     for epoch in range(num_epochs):
+        print(f"\nEpoch {epoch+1}/{num_epochs}")
+        
         # Training phase
         model.train()
         running_loss = 0.0
@@ -330,53 +379,50 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
         total = 0
         batch_count = 0
         
-        print(f"\nEpoch {epoch+1}/{num_epochs}")
-        print("Training phase:")
-        
         for i, (images, labels) in enumerate(train_loader):
             if i >= train_batches:
                 break
-                
-            images, labels = images.to(device), labels.to(device)
             
+            batch_start_time = time.time()
+            
+            # Log batch processing
+            send_batch_log_to_loki(i+1, train_batches, "train", "debug")
+            
+            images, labels = images.to(device), labels.to(device)
             optimizer.zero_grad()
             outputs = model(images)
             loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()
             
-            running_loss += loss.item()
+            # Calculate batch metrics
+            batch_loss = loss.item()
             _, predicted = torch.max(outputs.data, 1)
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
+            batch_accuracy = 100 * correct / total
+            batch_time = time.time() - batch_start_time
+            
+            # Send batch metrics
+            batch_metrics = {
+                "loss": batch_loss,
+                "accuracy": batch_accuracy,
+                "time": batch_time
+            }
+            
+            # Send to Loki
+            send_batch_metrics_to_loki(batch_metrics, "train")
+            
+            # Send to Prometheus
+            send_metrics_to_prometheus("batch_loss", batch_loss, {"phase": "train", "epoch": str(epoch+1), "batch": str(i+1)})
+            send_metrics_to_prometheus("batch_accuracy", batch_accuracy, {"phase": "train", "epoch": str(epoch+1), "batch": str(i+1)})
+            send_metrics_to_prometheus("batch_time", batch_time, {"phase": "train", "epoch": str(epoch+1), "batch": str(i+1)})
+            
+            running_loss += batch_loss
             batch_count += 1
             
-            # Calculate batch metrics
-            batch_loss = loss.item()
-            batch_accuracy = 100 * (predicted == labels).sum().item() / labels.size(0)
-            
-            # Send batch metrics to Prometheus and Loki
-            send_metrics_to_prometheus(
-                'train_loss_batch', 
-                batch_loss,
-                {
-                    'epoch': str(epoch + 1),
-                    'batch': str(i + 1),
-                    'phase': 'train'
-                }
-            )
-            send_metrics_to_prometheus(
-                'train_accuracy_batch',
-                batch_accuracy,
-                {
-                    'epoch': str(epoch + 1),
-                    'batch': str(i + 1),
-                    'phase': 'train'
-                }
-            )
-            
             if i % 10 == 0:
-                print(f"Batch {i}/{train_batches} - Loss: {batch_loss:.4f} - Acc: {batch_accuracy:.2f}%")
+                print(f"Batch {i+1}/{train_batches} - Loss: {batch_loss:.4f} - Acc: {batch_accuracy:.2f}%")
         
         # Calculate epoch metrics
         avg_train_loss = running_loss / batch_count

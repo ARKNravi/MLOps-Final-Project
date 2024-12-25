@@ -7,7 +7,7 @@
             "config": {
                 "maxLambdaSize": "15mb",
                 "runtime": "python3.9",
-                "installCommand": "python -m pip install --no-cache-dir -r requirements-deploy.txt"
+                "installCommand": "python -m pip install --upgrade pip && python -m pip install -r requirements-deploy.txt --no-cache-dir"
             }
         }
     ],
