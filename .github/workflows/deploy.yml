@@ -18,12 +18,12 @@ jobs:
             - name: Setup Python
               uses: actions/setup-python@v4
               with:
-                  python-version: "3.9"
+                  python-version: "3.9.18"
                   cache: "pip"
 
             - name: Install dependencies
               run: |
-                  python -m pip install --upgrade pip
+                  python -m pip install --upgrade pip setuptools wheel
                   pip install -r requirements-deploy.txt --no-cache-dir
 
             - name: Install Vercel CLI
@@ -43,6 +43,11 @@ jobs:
                   # Copy configuration files
                   cp vercel/output/builds.json .vercel/output/
                   cp vercel/output/config.json .vercel/output/
+
+                  # Verify Python version
+                  python --version
+                  which python
+                  which pip
 
                   # Verify files
                   echo "Checking deployment files:"

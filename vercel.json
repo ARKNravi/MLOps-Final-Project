@@ -1,14 +1,13 @@
 {
     "version": 2,
-    "buildCommand": "pip install -r requirements-deploy.txt",
     "builds": [
         {
             "src": "/script/app.py",
-            "use": "@vercel/python",
+            "use": "@vercel/python@3.1.49",
             "config": {
                 "maxLambdaSize": "15mb",
                 "runtime": "python3.9",
-                "installCommand": "python -m pip install --upgrade pip && pip install -r requirements-deploy.txt --no-cache-dir"
+                "installCommand": "pip3.9 install --no-cache-dir -r requirements-deploy.txt"
             }
         }
     ],
@@ -19,7 +18,7 @@
         }
     ],
     "env": {
-        "PYTHON_VERSION": "3.9",
+        "PYTHON_VERSION": "3.9.18",
         "PIP_TARGET": ".pip",
         "PYTHONPATH": "/var/task/.pip:/var/task/script"
     }
