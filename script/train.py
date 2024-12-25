@@ -326,23 +326,22 @@ def send_batch_metrics_to_loki(batch_metrics, phase="train", level="info"):
 # Training function
 def train_model(model, train_loader, val_loader, criterion, optimizer, num_epochs, device):
     best_val_loss = float('inf')
-    train_losses = []
-    val_losses = []
     
-    # Inisialisasi variabel untuk tracking metrik
-    running_train_loss = 0.0
-    running_train_correct = 0
-    running_train_total = 0
-    running_val_loss = 0.0
-    running_val_correct = 0
-    running_val_total = 0
+    # Inisialisasi buffer untuk moving average
+    train_loss_buffer = []
+    train_acc_buffer = []
+    val_loss_buffer = []
+    val_acc_buffer = []
+    window_size = 5  # Ukuran window untuk moving average
     
     for epoch in range(num_epochs):
         print(f"\nEpoch {epoch+1}/{num_epochs}")
         
         # Training phase
         model.train()
-        batch_count = 0
+        running_loss = 0.0
+        running_correct = 0
+        running_total = 0
         
         for i, (images, labels) in enumerate(train_loader):
             if i >= train_batches:
@@ -350,100 +349,98 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
             
             images, labels = images.to(device), labels.to(device)
             optimizer.zero_grad()
-            outputs = model(images)
+            outputs = model(inputs)
             loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()
             
-            # Akumulasi metrik training
+            # Hitung metrik per batch
             batch_loss = loss.item()
             _, predicted = torch.max(outputs.data, 1)
-            running_train_loss += batch_loss
-            running_train_total += labels.size(0)
-            running_train_correct += (predicted == labels).sum().item()
-            batch_count += 1
+            batch_correct = (predicted == labels).sum().item()
+            batch_total = labels.size(0)
+            batch_accuracy = 100 * batch_correct / batch_total
             
-            # Kirim metrik setiap 5 batch
-            if (i + 1) % 5 == 0:
-                avg_train_loss = running_train_loss / batch_count
-                train_accuracy = 100 * running_train_correct / running_train_total
+            # Tambahkan ke buffer
+            train_loss_buffer.append(batch_loss)
+            train_acc_buffer.append(batch_accuracy)
+            
+            # Kirim moving average setiap 5 batch
+            if len(train_loss_buffer) >= window_size:
+                avg_train_loss = sum(train_loss_buffer[-window_size:]) / window_size
+                avg_train_acc = sum(train_acc_buffer[-window_size:]) / window_size
                 
-                # Kirim metrik training yang terakumulasi
+                # Kirim ke Prometheus
                 send_metric_to_prometheus(
                     "train_loss",
                     avg_train_loss,
-                    {"epoch": str(epoch + 1)}
+                    {"type": "moving_average"}
                 )
                 send_metric_to_prometheus(
                     "train_accuracy",
-                    train_accuracy,
-                    {"epoch": str(epoch + 1)}
+                    avg_train_acc,
+                    {"type": "moving_average"}
                 )
                 
-                print(f"Batch {i+1}/{train_batches} - Loss: {avg_train_loss:.4f} - Acc: {train_accuracy:.2f}%")
+                print(f"Batch {i+1}/{train_batches} - Moving Avg Loss: {avg_train_loss:.4f} - Acc: {avg_train_acc:.2f}%")
         
         # Validation phase
         model.eval()
-        running_val_loss = 0.0
-        running_val_correct = 0
-        running_val_total = 0
-        val_batch_count = 0
-        
-        print("\nValidation phase:")
         with torch.no_grad():
             for i, (images, labels) in enumerate(val_loader):
                 if i >= val_batches:
                     break
-                    
+                
                 images, labels = images.to(device), labels.to(device)
                 outputs = model(images)
                 loss = criterion(outputs, labels)
                 
-                # Akumulasi metrik validation
+                # Hitung metrik per batch
                 batch_loss = loss.item()
                 _, predicted = torch.max(outputs.data, 1)
-                running_val_loss += batch_loss
-                running_val_total += labels.size(0)
-                running_val_correct += (predicted == labels).sum().item()
-                val_batch_count += 1
+                batch_correct = (predicted == labels).sum().item()
+                batch_total = labels.size(0)
+                batch_accuracy = 100 * batch_correct / batch_total
                 
-                # Kirim metrik setiap 5 batch
-                if (i + 1) % 5 == 0:
-                    avg_val_loss = running_val_loss / val_batch_count
-                    val_accuracy = 100 * running_val_correct / running_val_total
+                # Tambahkan ke buffer
+                val_loss_buffer.append(batch_loss)
+                val_acc_buffer.append(batch_accuracy)
+                
+                # Kirim moving average setiap 5 batch
+                if len(val_loss_buffer) >= window_size:
+                    avg_val_loss = sum(val_loss_buffer[-window_size:]) / window_size
+                    avg_val_acc = sum(val_acc_buffer[-window_size:]) / window_size
                     
-                    # Kirim metrik validation yang terakumulasi
+                    # Kirim ke Prometheus
                     send_metric_to_prometheus(
                         "val_loss",
                         avg_val_loss,
-                        {"epoch": str(epoch + 1)}
+                        {"type": "moving_average"}
                     )
                     send_metric_to_prometheus(
                         "val_accuracy",
-                        val_accuracy,
-                        {"epoch": str(epoch + 1)}
+                        avg_val_acc,
+                        {"type": "moving_average"}
                     )
                     
-                    print(f"Batch {i+1}/{val_batches} - Loss: {avg_val_loss:.4f} - Acc: {val_accuracy:.2f}%")
+                    print(f"Val Batch {i+1}/{val_batches} - Moving Avg Loss: {avg_val_loss:.4f} - Acc: {avg_val_acc:.2f}%")
         
-        # Calculate final epoch metrics
-        epoch_train_loss = running_train_loss / batch_count
-        epoch_train_accuracy = 100 * running_train_correct / running_train_total
-        epoch_val_loss = running_val_loss / val_batch_count
-        epoch_val_accuracy = 100 * running_val_correct / running_val_total
+        # Batasi ukuran buffer
+        if len(train_loss_buffer) > train_batches:
+            train_loss_buffer = train_loss_buffer[-train_batches:]
+            train_acc_buffer = train_acc_buffer[-train_batches:]
+        if len(val_loss_buffer) > val_batches:
+            val_loss_buffer = val_loss_buffer[-val_batches:]
+            val_acc_buffer = val_acc_buffer[-val_batches:]
         
-        # Print epoch summary
-        print(f"\nEpoch {epoch+1} Summary:")
-        print(f"Train Loss: {epoch_train_loss:.4f} - Train Acc: {epoch_train_accuracy:.2f}%")
-        print(f"Val Loss: {epoch_val_loss:.4f} - Val Acc: {epoch_val_accuracy:.2f}%")
-        
-        # Save best model
-        if epoch_val_loss < best_val_loss:
-            best_val_loss = epoch_val_loss
+        # Save best model berdasarkan rata-rata val_loss terakhir
+        current_val_loss = sum(val_loss_buffer[-window_size:]) / window_size
+        if current_val_loss < best_val_loss:
+            best_val_loss = current_val_loss
             torch.save(model.state_dict(), 'best_model.pth')
             print("✨ New best model saved!")
     
-    return train_losses, val_losses
+    return train_loss_buffer, val_loss_buffer
 
 # Main script
 if __name__ == "__main__":
