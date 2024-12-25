@@ -31,13 +31,16 @@ jobs:
               with:
                   node-version: "16"
 
+            - name: Create Vercel Project Link
+              run: |
+                  mkdir -p .vercel
+                  echo '{"orgId":"${{ secrets.VERCEL_ORG_ID }}","projectId":"${{ secrets.VERCEL_PROJECT_ID }}"}' > .vercel/project.json
+
             - name: Install Vercel CLI
               run: npm install --global vercel@latest
 
-            - name: Create Vercel Project Link
-              run: |
-                  mkdir .vercel
-                  echo '{"orgId":"${{ secrets.VERCEL_ORG_ID }}","projectId":"${{ secrets.VERCEL_PROJECT_ID }}"}' > .vercel/project.json
+            - name: Pull Vercel Environment Information
+              run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
 
             - name: Deploy to Vercel
               env:
@@ -45,4 +48,4 @@ jobs:
                   VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
                   VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
               run: |
-                  vercel deploy --prod --token=${{ secrets.VERCEL_TOKEN }}
+                  vercel --prod --token=${{ secrets.VERCEL_TOKEN }} --confirm
