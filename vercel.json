@@ -1,23 +1,17 @@
 {
-    "version": 2,
-    "builds": [
-        {
-            "src": "script/app.py",
-            "use": "@vercel/python@3.1.49",
-            "config": {
-                "maxLambdaSize": "15mb",
-                "runtime": "python3.8",
-                "installCommand": "python -m pip install --upgrade pip && pip install -r requirements-deploy.txt --no-cache-dir"
-            }
+    "version": 3,
+    "functions": {
+        "script/app.py": {
+            "runtime": "@vercel/python@3.1.49",
+            "memory": 1024,
+            "maxDuration": 10
         }
-    ],
+    },
     "routes": [
         {
             "src": "/(.*)",
-            "dest": "script/app.py"
+            "dest": "/script/app.py"
         }
     ],
-    "env": {
-        "PYTHONPATH": "/var/task"
-    }
+    "buildCommand": "pip install -r requirements-deploy.txt"
 }
