@@ -265,6 +265,72 @@ def log_to_grafana(metric_name, value, labels=None):
         print(f"Error logging metric: {e}")
         return False
 
+def send_test_metrics_to_prometheus(metric_name, value, labels=None):
+    try:
+        timestamp_ms = int(time.time() * 1000)
+        
+        if not labels:
+            labels = {}
+            
+        # Add default labels
+        labels.update({
+            'environment': 'github_actions',
+            'job': 'mlops_testing'
+        })
+        
+        # Format metric data
+        metric_data = {
+            'series': [{
+                'labels': [
+                    {'name': '__name__', 'value': metric_name}
+                ] + [
+                    {'name': k, 'value': str(v)}
+                    for k, v in labels.items()
+                ],
+                'samples': [
+                    [timestamp_ms, str(float(value))]
+                ]
+            }]
+        }
+        
+        # Send to Prometheus
+        response = requests.post(
+            os.environ.get('PROMETHEUS_REMOTE_WRITE_URL'),
+            json=metric_data,
+            auth=(os.environ.get('PROMETHEUS_USERNAME'), os.environ.get('PROMETHEUS_API_KEY')),
+            headers={
+                'Content-Type': 'application/json',
+                'X-Scope-OrgID': os.environ.get('PROMETHEUS_USERNAME')
+            }
+        )
+        
+        # Send to Loki
+        loki_timestamp = int(time.time() * 1e9)
+        loki_payload = {
+            'streams': [{
+                'stream': {
+                    'job': 'mlops_testing',
+                    'environment': 'github_actions',
+                    'metric': metric_name
+                },
+                'values': [
+                    [str(loki_timestamp), f"Testing metric: {metric_name}={value}"]
+                ]
+            }]
+        }
+        
+        loki_response = requests.post(
+            f"{os.environ.get('LOKI_URL')}/loki/api/v1/push",
+            json=loki_payload,
+            auth=(os.environ.get('LOKI_USERNAME'), os.environ.get('LOKI_API_KEY')),
+            headers={'Content-Type': 'application/json'}
+        )
+        
+        return True
+    except Exception as e:
+        print(f"Error sending metrics: {e}")
+        return False
+
 def test_model(model, test_loader, criterion, device):
     # Set debug mode for quick testing
     debug_mode = True  # Force debug mode to be True
@@ -311,9 +377,9 @@ def test_model(model, test_loader, criterion, device):
     print(f'Average Loss: {avg_test_loss:.4f}')
     print(f'Accuracy: {test_accuracy:.2f}%')
     
-    # Send final metrics
-    send_metric_to_prometheus("final_test_loss", avg_test_loss)
-    send_metric_to_prometheus("final_test_accuracy", test_accuracy)
+    # Send metrics
+    send_test_metrics_to_prometheus('test_loss', avg_test_loss)
+    send_test_metrics_to_prometheus('test_accuracy', test_accuracy)
     
     return avg_test_loss, test_accuracy
 

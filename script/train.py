@@ -250,6 +250,72 @@ def save_metrics_to_supabase(metrics, phase="train"):
         print(f"❌ Error saving metrics to Supabase: {e}")
         return False
 
+def send_metrics_to_prometheus(metric_name, value, labels=None):
+    try:
+        timestamp_ms = int(time.time() * 1000)
+        
+        if not labels:
+            labels = {}
+            
+        # Add default labels
+        labels.update({
+            'environment': 'github_actions',
+            'job': 'mlops_training'
+        })
+        
+        # Format metric data
+        metric_data = {
+            'series': [{
+                'labels': [
+                    {'name': '__name__', 'value': metric_name}
+                ] + [
+                    {'name': k, 'value': str(v)}
+                    for k, v in labels.items()
+                ],
+                'samples': [
+                    [timestamp_ms, str(float(value))]
+                ]
+            }]
+        }
+        
+        # Send to Prometheus
+        response = requests.post(
+            os.environ.get('PROMETHEUS_REMOTE_WRITE_URL'),
+            json=metric_data,
+            auth=(os.environ.get('PROMETHEUS_USERNAME'), os.environ.get('PROMETHEUS_API_KEY')),
+            headers={
+                'Content-Type': 'application/json',
+                'X-Scope-OrgID': os.environ.get('PROMETHEUS_USERNAME')
+            }
+        )
+        
+        # Send to Loki
+        loki_timestamp = int(time.time() * 1e9)
+        loki_payload = {
+            'streams': [{
+                'stream': {
+                    'job': 'mlops_training',
+                    'environment': 'github_actions',
+                    'metric': metric_name
+                },
+                'values': [
+                    [str(loki_timestamp), f"Training metric: {metric_name}={value}"]
+                ]
+            }]
+        }
+        
+        loki_response = requests.post(
+            f"{os.environ.get('LOKI_URL')}/loki/api/v1/push",
+            json=loki_payload,
+            auth=(os.environ.get('LOKI_USERNAME'), os.environ.get('LOKI_API_KEY')),
+            headers={'Content-Type': 'application/json'}
+        )
+        
+        return True
+    except Exception as e:
+        print(f"Error sending metrics: {e}")
+        return False
+
 # Training function
 def train_model(model, train_loader, val_loader, criterion, optimizer, num_epochs, device):
     # Set debug mode for quick training
@@ -353,10 +419,11 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
         
         print(f'val Loss: {avg_val_loss:.4f} Acc: {val_accuracy:.4f}')
         
-        # Send epoch metrics
-        send_metric_to_prometheus("epoch_train_loss", avg_train_loss, {"epoch": str(epoch + 1)})
-        send_metric_to_prometheus("epoch_val_loss", avg_val_loss, {"epoch": str(epoch + 1)})
-        send_metric_to_prometheus("epoch_val_accuracy", val_accuracy, {"epoch": str(epoch + 1)})
+        # Send metrics to Prometheus & Loki
+        send_metrics_to_prometheus('train_loss', avg_train_loss, {'epoch': str(epoch)})
+        send_metrics_to_prometheus('train_accuracy', train_accuracy, {'epoch': str(epoch)})
+        send_metrics_to_prometheus('val_loss', avg_val_loss, {'epoch': str(epoch)})
+        send_metrics_to_prometheus('val_accuracy', val_accuracy, {'epoch': str(epoch)})
         
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
