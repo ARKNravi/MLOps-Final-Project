@@ -11,4 +11,6 @@ scikit-learn==1.3.0
 torch==1.13.1+cpu
 torchvision==0.14.1+cpu
 python-snappy
-protobuf 
+protobuf
+supabase==2.3.0
+python-dotenv==1.0.0 
