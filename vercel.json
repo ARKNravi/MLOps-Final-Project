@@ -1,17 +1,19 @@
 {
-    "version": 3,
-    "functions": {
-        "script/app.py": {
-            "runtime": "@vercel/python@3.1.49",
-            "memory": 1024,
-            "maxDuration": 10
+    "version": 2,
+    "builds": [
+        {
+            "src": "script/app.py",
+            "use": "@vercel/python@3.1.49",
+            "config": {
+                "maxLambdaSize": "15mb",
+                "runtime": "python3.8"
+            }
         }
-    },
+    ],
     "routes": [
         {
             "src": "/(.*)",
             "dest": "/script/app.py"
         }
-    ],
-    "buildCommand": "pip install -r requirements-deploy.txt"
+    ]
 }
