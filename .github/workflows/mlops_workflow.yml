@@ -573,30 +573,26 @@ jobs:
             - name: Checkout repository
               uses: actions/checkout@v2
 
-            - name: Log in to Docker Hub
-              uses: docker/login-action@v2
+            - name: Setup Python
+              uses: actions/setup-python@v4
               with:
-                  username: ${{ secrets.DOCKER_USERNAME }}
-                  password: ${{ secrets.DOCKER_PASSWORD }}
+                  python-version: "3.9"
+                  cache: "pip"
 
-            # Install semua dependencies yang diperlukan
-            - name: Install additional dependencies
+            # Install dependencies
+            - name: Install dependencies
               run: |
+                  python -m pip install --upgrade pip
                   pip install matplotlib seaborn scikit-learn pandas numpy mlflow
                   pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-                  pip install supabase==2.3.0
-                  pip install python-snappy  # Tambahkan ini untuk mengatasi error snappy
+                  pip install supabase==1.0.3
+                  pip install python-snappy protobuf
 
-            - name: Build Dependencies Image
-              run: |
-                  docker build -t ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest .
-                  docker push ${{ secrets.DOCKER_USERNAME }}/mlops_dependencies:latest
-
+            # Setup Prometheus
             - name: Install Prometheus Dependencies
               run: |
                   sudo apt-get update && sudo apt-get install -y python3-pip libsnappy-dev
                   sudo apt-get install -y protobuf-compiler
-                  pip3 install prometheus-client requests python-snappy protobuf supabase==2.3.0 mlflow
 
                   # Setup Prometheus proto file
                   cat > remote_write.proto << EOF
@@ -626,46 +622,6 @@ jobs:
                   EOF
 
                   protoc --python_out=script/ remote_write.proto
-
-            - name: Install system dependencies
-              run: |
-                  sudo apt-get update
-                  sudo apt-get install -y protobuf-compiler python3-snappy
-
-            - name: Generate Protobuf
-              run: |
-                  # Create proto file
-                  cat > remote_write.proto << EOF
-                  syntax = "proto3";
-                  package prometheus;
-
-                  option go_package = "prompb";
-
-                  message WriteRequest {
-                    repeated TimeSeries timeseries = 1;
-                  }
-
-                  message TimeSeries {
-                    repeated Label labels = 1;
-                    repeated Sample samples = 2;
-                  }
-
-                  message Label {
-                    string name = 1;
-                    string value = 2;
-                  }
-
-                  message Sample {
-                    double value = 1;
-                    int64 timestamp = 2;
-                  }
-                  EOF
-
-                  # Generate Python file
-                  protoc --python_out=. remote_write.proto
-
-                  # Move generated file to script directory
-                  mv remote_write_pb2.py script/
 
             - name: Train model
               env:

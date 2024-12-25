@@ -12,5 +12,5 @@ torch==1.13.1+cpu
 torchvision==0.14.1+cpu
 python-snappy
 protobuf
-supabase==2.3.0
+supabase==1.0.3
 python-dotenv==1.0.0 
