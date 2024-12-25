@@ -57,9 +57,9 @@ jobs:
                   # Create project.json
                   echo '{"orgId":"${{ secrets.VERCEL_ORG_ID }}","projectId":"${{ secrets.VERCEL_PROJECT_ID }}"}' > .vercel/project.json
                   
-                  # Create config.json
+                  # Create config.json with version 3
                   echo '{
-                    "version": 2,
+                    "version": 3,
                     "routes": [
                       {
                         "src": "/(.*)",
@@ -70,7 +70,7 @@ jobs:
                   
                   # Create builds.json
                   echo '{
-                    "version": 2,
+                    "version": 3,
                     "builds": [
                       {
                         "src": "script/app.py",
