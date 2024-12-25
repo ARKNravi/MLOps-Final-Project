@@ -29,6 +29,21 @@ jobs:
             - name: Install Vercel CLI
               run: npm install --global vercel@latest
 
+            - name: Setup Python environment for Vercel
+              run: |
+                  # Install Python 3.9
+                  sudo apt-get update
+                  sudo apt-get install -y python3.9 python3.9-dev python3.9-venv
+
+                  # Create symlinks
+                  sudo update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.9 1
+                  sudo update-alternatives --set python3 /usr/bin/python3.9
+
+                  # Verify installation
+                  python3 --version
+                  which python3
+                  which python3.9
+
             - name: Prepare for deployment
               run: |
                   # Create deployment directory
@@ -46,17 +61,10 @@ jobs:
                   cp vercel/output/builds.json deploy/vercel/output/
                   cp vercel/output/config.json deploy/vercel/output/
 
-                  # Verify Python setup
-                  echo "Python version:"
-                  python --version
-                  echo "Pip version:"
-                  pip --version
-
-                  # Create Python symlink if needed
-                  if [ ! -f /usr/local/bin/python3.9 ]; then
-                      echo "Creating Python symlink..."
-                      sudo ln -sf $(which python) /usr/local/bin/python3.9
-                  fi
+                  # Verify files
+                  echo "Deployment files:"
+                  ls -la deploy/script/
+                  ls -la deploy/vercel/output/
 
             - name: Deploy to Vercel
               env:
@@ -67,10 +75,9 @@ jobs:
               run: |
                   echo "Starting Vercel deployment..."
                   vercel pull --yes --environment=production --token=$VERCEL_TOKEN
-                  vercel deploy --prod --archive=tgz --token=$VERCEL_TOKEN
+                  vercel deploy --prod --token=$VERCEL_TOKEN
 
             - name: Cleanup
               if: always()
               run: |
                   rm -rf deploy
-                  sudo rm -f /usr/local/bin/python3.9
