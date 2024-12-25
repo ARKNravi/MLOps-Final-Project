@@ -1,12 +1,9 @@
 {
-    "version": 3,
+    "version": 2,
     "routes": [
         {
             "src": "/(.*)",
-            "dest": "/script/app.py"
+            "dest": "script/app.py"
         }
-    ],
-    "env": {
-        "PYTHON_VERSION": "3.9"
-    }
+    ]
 }
