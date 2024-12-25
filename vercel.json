@@ -3,10 +3,11 @@
     "builds": [
         {
             "src": "script/app.py",
-            "use": "@vercel/python",
+            "use": "@vercel/python@3.1.49",
             "config": {
                 "maxLambdaSize": "15mb",
-                "runtime": "python3.9"
+                "runtime": "python3.9",
+                "installCommand": "pip install -r requirements-deploy.txt --no-cache-dir"
             }
         }
     ],

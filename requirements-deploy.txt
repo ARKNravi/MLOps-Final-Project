@@ -2,5 +2,6 @@ fastapi==0.109.0
 uvicorn==0.25.0
 python-multipart==0.0.6
 pillow==9.5.0
+--find-links https://download.pytorch.org/whl/cpu
 torch==1.13.1+cpu
 torchvision==0.14.1+cpu 
